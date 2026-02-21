@@ -1,0 +1,20 @@
+# dont commit venv stuffs or other artifacts
+.venv/*
+*.egg-info
+*.pyc
+sqlite/attendance_tracker.db
+build/*
+.env
+*.zip
+*.csv
+*.png
+*.txt
+*.out
+*.err
+*/data/*
+
+# dont commit empty script for testing stuff
+temp.py
+
+# dont commit MacOS files
+.DS_Store

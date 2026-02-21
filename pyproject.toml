@@ -12,6 +12,10 @@ authors = [ # put your name, email here!
 ]
 dependencies = [
     "requests",
+    "flask",
+    "google-auth",
+    "google-auth-oauthlib",
+    "google-api-python-client",
 ]
 
 [project.optional-dependencies]

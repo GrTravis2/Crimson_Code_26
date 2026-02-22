@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import flask
 
-from Secretariat.google_calendar.google_calendar import GoogleCalendar
+from secretariat.google_calendar.google_calendar import GoogleCalendar
 
 
 class Secretariat(flask.Flask):

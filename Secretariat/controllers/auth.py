@@ -20,6 +20,7 @@ AUTH = flask.Blueprint(
 )
 
 SCOPES = [
+    "https://www.googleapis.com/auth/drive.metadata.readonly",
     "https://www.googleapis.com/auth/calendar.events",
     "https://www.googleapis.com/auth/calendar.readonly",
 ]
@@ -124,24 +125,27 @@ def refresh(
 @AUTH.route("/login", methods=["GET", "POST"])
 def login() -> ResponseReturnValue:
     """Start OAuth by redirecting users to Google sign-in."""
-    redirect_target = _safe_redirect_target(flask.request.values.get("next"))
-    flask.session["post_auth_redirect"] = redirect_target
+    # redirect_target = _safe_redirect_target(flask.request.values.get("next"))
+    # flask.session["post_auth_redirect"] = redirect_target
 
-    try:
-        flow = Flow.from_client_secrets_file(
-            str(CLIENT_SECRETS_FILE),
-            scopes=SCOPES,
-        )
+    # try:
+    flow = Flow.from_client_secrets_file(
+        str(CLIENT_SECRETS_FILE),
+        scopes=SCOPES,
+    )
+    """
     except FileNotFoundError:
         flask.flash(
             "Google OAuth is not configured. Missing credentials_web.json.",
             "error",
         )
         return flask.redirect(redirect_target)
+    """
 
-    oauth_redirect_uri = _oauth_redirect_uri()
-    flow.redirect_uri = oauth_redirect_uri
-    flask.session["oauth_redirect_uri"] = oauth_redirect_uri
+    # oauth_redirect_uri = _oauth_redirect_uri()
+    # flow.redirect_uri = flask.url_for("auth.oauth2callback")
+    flow.redirect_uri = "http://127.0.0.1:5000/auth/oauth2callback"
+    # flask.session["oauth_redirect_uri"] = oauth_redirect_uri
 
     authorization_url, state = flow.authorization_url(
         access_type="offline",
@@ -153,9 +157,10 @@ def login() -> ResponseReturnValue:
     return flask.redirect(authorization_url)
 
 
-@AUTH.route("/oauth2callback")
+@AUTH.route("/oauth2callback", methods=["GET", "POST"])
 def oauth2callback() -> ResponseReturnValue:
     """Handle OAuth callback and persist token data in the session."""
+    """
     redirect_target = _safe_redirect_target(
         flask.session.pop("post_auth_redirect", _default_redirect_target())
     )
@@ -163,14 +168,15 @@ def oauth2callback() -> ResponseReturnValue:
     if oauth_error:
         flask.flash(f"Google authentication failed: {oauth_error}.", "error")
         return flask.redirect(redirect_target)
-
+    """
+    redirect_uri = "http://127.0.0.1:5000/home"
     oauth_state = flask.session.get("state")
     if oauth_state is None:
         flask.flash(
             "OAuth session expired. Please try signing in again.",
             "error",
         )
-        return flask.redirect(redirect_target)
+        return flask.redirect(flask.url_for("auth.login"))
 
     try:
         flow = Flow.from_client_secrets_file(
@@ -183,14 +189,16 @@ def oauth2callback() -> ResponseReturnValue:
             "Google OAuth is not configured. Missing credentials_web.json.",
             "error",
         )
-        return flask.redirect(redirect_target)
+        return flask.redirect(redirect_uri)
 
+    """
     stored_redirect_uri = flask.session.get("oauth_redirect_uri")
     redirect_uri = (
         stored_redirect_uri
         if isinstance(stored_redirect_uri, str) and stored_redirect_uri
         else _oauth_redirect_uri()
     )
+    """
     flow.redirect_uri = redirect_uri
 
     try:
@@ -208,9 +216,10 @@ def oauth2callback() -> ResponseReturnValue:
             f"{detail_text}",
             "error",
         )
-        return flask.redirect(redirect_target)
+        return flask.redirect(redirect_uri)
 
     credentials = flow.credentials
+    """
     flask.session["credentials"] = {
         "token": _credential_string(credentials, "token"),
         "refresh_token": _credential_string(credentials, "refresh_token"),
@@ -219,11 +228,17 @@ def oauth2callback() -> ResponseReturnValue:
         "client_secret": _credential_string(credentials, "client_secret"),
         "scopes": _credential_scopes(credentials),
     }
-    flask.session.pop("state", None)
-    flask.session.pop("oauth_redirect_uri", None)
+    """
+    flask.session["credentials"] = {
+        "token": credentials.token,
+        "refresh_token": credentials.refresh_token,
+        "granted_scopes": credentials.granted_scopes,  # type: ignore
+    }
+    # flask.session.pop("state", None)
+    # flask.session.pop("oauth_redirect_uri", None)
     flask.flash("Google Calendar connected.", "success")
 
-    return flask.redirect(redirect_target)
+    return flask.redirect(redirect_uri)
 
 
 # added log out part

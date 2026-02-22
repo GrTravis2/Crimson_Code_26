@@ -4,7 +4,7 @@ import itertools
 from datetime import datetime, timedelta
 from typing import Any, Self
 
-from Secretariat.google_calendar.calendar_event import CalendarEvent
+from secretariat.google_calendar.calendar_event import CalendarEvent
 
 type Appointment = None
 

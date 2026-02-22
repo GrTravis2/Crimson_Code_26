@@ -13,9 +13,9 @@ from flask.typing import ResponseReturnValue
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
-from Secretariat.app import Secretariat
-from Secretariat.controllers.auth import AUTH, SCOPES
-from Secretariat.google_calendar.google_calendar import GoogleCalendar
+from secretariat.app import Secretariat
+from secretariat.controllers.auth import AUTH, SCOPES
+from secretariat.google_calendar.google_calendar import GoogleCalendar
 
 PULLMAN_BUSINESSES: list[dict[str, Any]] = [
     {

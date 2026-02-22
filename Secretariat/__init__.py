@@ -14,6 +14,7 @@ from googleapiclient.discovery import build
 
 from Secretariat.app import Secretariat
 from Secretariat.controllers.auth import AUTH, SCOPES
+from Secretariat.google_calendar.google_calendar import GoogleCalendar
 
 PULLMAN_BUSINESSES: list[dict[str, Any]] = [
     {
@@ -769,6 +770,17 @@ def create_app() -> Secretariat:
     def inject_google_auth_state() -> dict[str, bool]:
         """Expose current Google auth state to all templates."""
         return {"google_authenticated": _has_google_session_credentials()}
+
+    cal_ids = {
+        ("zuriel", "zurielhernandez04@gmail.com"),
+        (
+            "test",
+            "7400e98d2ffd7844bc8925b0753fc023a4d8876ec190205d73429e0dffd0db55@group.calendar.google.com",
+        ),
+    }
+    app.calendars = {
+        alias: GoogleCalendar(calendar_id) for alias, calendar_id in cal_ids
+    }
 
     @app.route("/")
     def index() -> ResponseReturnValue:

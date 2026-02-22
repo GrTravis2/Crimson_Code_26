@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import functools
 import os
 import pathlib
+from typing import Callable
 from urllib.parse import urlparse
 
 import flask
@@ -52,6 +54,20 @@ def _credential_scopes(credentials: object) -> list[str]:
         return []
 
     return [scope for scope in raw_scopes if isinstance(scope, str)]
+
+
+def refresh(
+    func: Callable[..., ResponseReturnValue],
+) -> Callable[..., ResponseReturnValue]:
+    """Redirect to login when Google credentials are missing from session."""
+
+    @functools.wraps(func)
+    def wrapper(*args: object, **kwargs: object) -> ResponseReturnValue:
+        if "credentials" not in flask.session:
+            return flask.redirect(location=flask.url_for("auth.login"))
+        return func(*args, **kwargs)
+
+    return wrapper
 
 
 @AUTH.route("/login", methods=["GET", "POST"])

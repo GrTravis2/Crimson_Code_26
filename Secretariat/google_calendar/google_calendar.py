@@ -1,52 +1,76 @@
 """Calendar class to be used for scheduling."""
 
-from datetime import datetime
-from typing import Self
+import itertools
+from datetime import datetime, timedelta
+from typing import Any, Self
 
-from googleapiclient.discovery import build
+from Secretariat.google_calendar.calendar_event import CalendarEvent
 
-type CalEvent = tuple[float, float]
 type Appointment = None
 
 
 class GoogleCalendar:
     """Calendar Class which contains a persons booked events."""
 
-    def __init__(self, creds) -> None:
+    def __init__(self, calendar_id: str) -> None:
         """Create a Calendar Object from google api credentials."""
-        self.service = build("Calendar", "V3", credentials=creds)
+        self.id = calendar_id
 
-    def get_available_times(self, start_time, end_time) -> list:
-        """Given a datetime range return all available times."""
-        raise NotImplementedError
-
-    def _get_booked_times(
+    def get_calendar_events(
         self,
-        start_time: datetime,
-        end_time: datetime,
-    ) -> list:
-        """Given a datetime range return all booked times."""
+        service: Any,
+        start: datetime,
+        end: datetime,
+    ) -> list[CalendarEvent]:
+        """Get your calendar events in ascending order from start to end."""
         events_result = (
-            self.service.events()
+            service.events()
             .list(
-                calendarId="primary",
-                timeMin=start_time.isoformat(),
-                timeMax=end_time.isoformat(),
+                calendarId=self.id,
+                timeMin=start.isoformat(),
+                timeMax=end.isoformat(),
                 singleEvents=True,
                 orderBy="startTime",
             )
             .execute()
         )
-        events = events_result.get("items", [])
+        events: list[CalendarEvent] = events_result.get("items", [])
         return events
 
-    def schedule_appt(self, appt: Appointment, server: Self) -> list[CalEvent]:
+    def find_common_availability(
+        self,
+        client_events: list[CalendarEvent],
+        server_events: list[CalendarEvent],
+        start: datetime,
+        end: datetime,
+    ) -> set[datetime]:
+        """Return shared availability for two calendars."""
+        step = timedelta(minutes=15)
+        current = start
+        free_slots: set[datetime] = set()
+        while current <= end:
+            free_slots.add(current)
+            current += step
+
+        for e in itertools.chain(client_events, server_events):
+            if (dt := e["start"]["datetime"]) in free_slots:
+                free_slots.discard(dt)
+            if (dt := e["end"]["datetime"]) in free_slots:
+                free_slots.discard(dt)
+
+        return free_slots
+
+    def schedule_appt(
+        self,
+        appt: Appointment,
+        server: Self,
+    ) -> list[CalendarEvent]:
         """Schedule the optimal appt time against a businesses calendar."""
         raise NotImplementedError
 
     def _scheduler_helper(
-        self, client: list[CalEvent], server: list[CalEvent]
-    ) -> list[CalEvent]:
+        self, client: list[CalendarEvent], server: list[CalendarEvent]
+    ) -> list[CalendarEvent]:
         """Find compatible times between the two available dates."""
         raise NotImplementedError
 

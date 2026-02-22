@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import unittest
+from datetime import date
 from unittest.mock import patch
 
 from Secretariat import (
     _google_event_time_label,
+    _home_week_columns,
     _parse_google_datetime,
     create_app,
 )
@@ -85,10 +87,13 @@ class RouteFlowTests(unittest.TestCase):
                 "title": "Mock Event",
                 "time_label": "Mon, Feb 23 · 9:00 AM - 10:00 AM",
                 "location": "Pullman",
+                "day_iso": "2026-02-23",
+                "slot_label": "9:00 AM - 10:00 AM",
+                "sort_key": 540,
             }
         ]
         with patch(
-            "Secretariat._load_user_week_events",
+            "Secretariat._load_user_events",
             return_value=(fake_events, "Mock Calendar"),
         ):
             response = self.client.get("/home", follow_redirects=False)
@@ -96,6 +101,23 @@ class RouteFlowTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Your Calendar", response.data)
         self.assertIn(b"Set Up Appointment", response.data)
+
+    def test_home_month_view_renders_label_and_controls(self) -> None:
+        """Render month view when requested through query parameters."""
+        self._seed_signed_in_session()
+        with patch(
+            "Secretariat._load_user_events",
+            return_value=([], "Mock Calendar"),
+        ):
+            response = self.client.get(
+                "/home?view=month&start=2026-02-01",
+                follow_redirects=False,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"February 2026", response.data)
+        self.assertIn(b"Prev", response.data)
+        self.assertIn(b"Next", response.data)
 
     def test_oauth_callback_missing_state_shows_error(self) -> None:
         """Display an OAuth error when callback state is unavailable."""
@@ -117,6 +139,41 @@ class RouteFlowTests(unittest.TestCase):
         self.assertEqual(response.headers.get("Location"), "/")
         with self.client.session_transaction() as session:
             self.assertNotIn("credentials", session)
+
+
+class HomeWeekColumnsTests(unittest.TestCase):
+    """Validate mapping events into Monday-Sunday home columns."""
+
+    def test_home_week_columns_places_events_in_matching_day(self) -> None:
+        """Keep events under the correct weekday with sorted times."""
+        columns = _home_week_columns(
+            week_start=date(2026, 2, 16),
+            today=date(2026, 2, 22),
+            events=[
+                {
+                    "title": "Late Event",
+                    "day_iso": "2026-02-18",
+                    "slot_label": "5:00 PM - 6:00 PM",
+                    "location": "Gym",
+                    "sort_key": 1020,
+                },
+                {
+                    "title": "Early Event",
+                    "day_iso": "2026-02-18",
+                    "slot_label": "9:00 AM - 10:00 AM",
+                    "location": "Library",
+                    "sort_key": 540,
+                },
+            ],
+        )
+
+        self.assertEqual(len(columns), 7)
+        wednesday = next(
+            column for column in columns if column["day_iso"] == "2026-02-18"
+        )
+        self.assertEqual(len(wednesday["events"]), 2)
+        self.assertEqual(wednesday["events"][0]["title"], "Early Event")
+        self.assertEqual(wednesday["events"][1]["title"], "Late Event")
 
 
 if __name__ == "__main__":

@@ -4,6 +4,8 @@ from datetime import date, datetime, time, timedelta
 from typing import Any
 
 import flask
+from flask.typing import ResponseReturnValue
+from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
 from Secretariat.controllers import auth
@@ -28,12 +30,26 @@ SERVICE_OPTIONS: list[dict[str, Any]] = [
 
 @HOME.route("/", methods=["GET"])
 @auth.refresh
-def home() -> str:
+def home() -> ResponseReturnValue:
     """Home page rendering."""
     with flask.current_app.app_context():
         cal: GoogleCalendar = flask.current_app.calendars["test"]  # type: ignore
 
-    service = build("calendar", "v3", flask.session["credentials"])
+    raw_credentials = flask.session.get("credentials")
+    if not isinstance(raw_credentials, dict):
+        return flask.redirect(flask.url_for("auth.login"))
+
+    try:
+        credentials = Credentials.from_authorized_user_info(raw_credentials)
+    except ValueError:
+        flask.session.pop("credentials", None)
+        return flask.redirect(flask.url_for("auth.login"))
+    service = build(
+        "calendar",
+        "v3",
+        credentials=credentials,
+        cache_discovery=False,
+    )
     start = datetime.now()
     end = start + timedelta(days=14)
     events = cal.get_calendar_events(service, start, end)

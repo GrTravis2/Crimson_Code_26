@@ -9,7 +9,7 @@ import flask
 # from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 
-from Secretariat.app import Secretariat
+from secretariat.app import Secretariat
 
 # from google_auth_oauthlib.flow import InstalledAppFlow
 # from googleapiclient.discovery import build

@@ -6,6 +6,7 @@ import os
 import pathlib
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import flask
 from flask.typing import ResponseReturnValue
@@ -146,6 +147,14 @@ HOME_MONTH_WEEKDAYS: tuple[str, ...] = (
     "Sun",
 )
 
+DEFAULT_SCHEDULE_TIMEZONE = "America/Los_Angeles"
+SLOT_REASON_LABELS: dict[str, str] = {
+    "available": "Available (both free)",
+    "user_busy": "Unavailable - You are busy",
+    "business_busy": "Unavailable - Business is busy",
+    "both_busy": "Unavailable - Both busy",
+}
+
 
 def _string_or_none(raw_value: object) -> str | None:
     """Return a string value when possible."""
@@ -219,6 +228,69 @@ def _parse_google_datetime(raw_value: str | None) -> datetime | None:
         return datetime.fromisoformat(normalized)
     except ValueError:
         return None
+
+
+def _schedule_timezone_name() -> str:
+    """Return timezone identifier used by schedule and bookings."""
+    return os.environ.get("SCHEDULE_TIMEZONE", DEFAULT_SCHEDULE_TIMEZONE)
+
+
+def _schedule_timezone() -> ZoneInfo:
+    """Resolve the scheduler timezone with UTC fallback."""
+    timezone_name = _schedule_timezone_name()
+    try:
+        return ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError:
+        return ZoneInfo("UTC")
+
+
+def _google_busy_interval(
+    event: dict[str, Any],
+    local_timezone: ZoneInfo,
+) -> tuple[datetime, datetime] | None:
+    """Return a local naive busy interval for a Google event."""
+    start_info = event.get("start", {})
+    end_info = event.get("end", {})
+    if not isinstance(start_info, dict) or not isinstance(end_info, dict):
+        return None
+
+    start_datetime = _parse_google_datetime(
+        _string_or_none(start_info.get("dateTime"))
+    )
+    end_datetime = _parse_google_datetime(
+        _string_or_none(end_info.get("dateTime"))
+    )
+    if start_datetime and end_datetime:
+        if start_datetime.tzinfo is None:
+            start_local = start_datetime.replace(tzinfo=local_timezone)
+        else:
+            start_local = start_datetime.astimezone(local_timezone)
+
+        if end_datetime.tzinfo is None:
+            end_local = end_datetime.replace(tzinfo=local_timezone)
+        else:
+            end_local = end_datetime.astimezone(local_timezone)
+
+        return (
+            start_local.replace(tzinfo=None),
+            end_local.replace(tzinfo=None),
+        )
+
+    all_day_start = _string_or_none(start_info.get("date"))
+    all_day_end = _string_or_none(end_info.get("date"))
+    if all_day_start and all_day_end:
+        try:
+            start_day = datetime.strptime(all_day_start, "%Y-%m-%d").date()
+            end_day = datetime.strptime(all_day_end, "%Y-%m-%d").date()
+        except ValueError:
+            return None
+
+        return (
+            datetime.combine(start_day, time.min),
+            datetime.combine(end_day, time.min),
+        )
+
+    return None
 
 
 # builds time labels derived from Google Calendar event data after parsing
@@ -347,6 +419,117 @@ def _google_events_in_range(
     return events
 
 
+def _google_user_busy_periods_for_window(
+    credentials: Credentials,
+    window_start: datetime,
+    window_end: datetime,
+) -> list[tuple[datetime, datetime]]:
+    """Load busy time windows for the user primary calendar."""
+    local_timezone = _schedule_timezone()
+    request_start = (window_start - timedelta(days=1)).replace(
+        tzinfo=local_timezone
+    )
+    request_end = (window_end + timedelta(days=1)).replace(
+        tzinfo=local_timezone
+    )
+    service = build(
+        "calendar",
+        "v3",
+        credentials=credentials,
+        cache_discovery=False,
+    )
+    response = (
+        service.events()
+        .list(
+            calendarId="primary",
+            timeMin=request_start.isoformat(),
+            timeMax=request_end.isoformat(),
+            singleEvents=True,
+            orderBy="startTime",
+            maxResults=500,
+        )
+        .execute()
+    )
+    raw_items = response.get("items", [])
+    if not isinstance(raw_items, list):
+        return []
+
+    busy_periods: list[tuple[datetime, datetime]] = []
+    for raw_item in raw_items:
+        if not isinstance(raw_item, dict):
+            continue
+
+        if _string_or_none(raw_item.get("status")) == "cancelled":
+            continue
+
+        if _string_or_none(raw_item.get("transparency")) == "transparent":
+            continue
+
+        busy_interval = _google_busy_interval(raw_item, local_timezone)
+        if busy_interval is None:
+            continue
+
+        busy_start, busy_end = busy_interval
+        if busy_start >= busy_end:
+            continue
+
+        if busy_start < window_end and busy_end > window_start:
+            busy_periods.append((busy_start, busy_end))
+
+    return busy_periods
+
+
+def _create_google_primary_event(
+    credentials: Credentials,
+    business: dict[str, Any],
+    service: dict[str, Any],
+    start_at: datetime,
+    end_at: datetime,
+) -> dict[str, Any]:
+    """Create an appointment event on the signed-in user's calendar."""
+    timezone_name = _schedule_timezone_name()
+    local_timezone = _schedule_timezone()
+    start_at_local = start_at.replace(tzinfo=local_timezone)
+    end_at_local = end_at.replace(tzinfo=local_timezone)
+
+    service_name = _string_or_none(service.get("name")) or "Appointment"
+    business_name = _string_or_none(business.get("name")) or "Business"
+    business_location = _string_or_none(business.get("location")) or ""
+
+    event_body = {
+        "summary": f"{service_name} at {business_name}",
+        "description": (
+            "Booked with Secretariat.\n"
+            f"Business: {business_name}\n"
+            f"Service: {service_name}"
+        ),
+        "location": business_location,
+        "start": {
+            "dateTime": start_at_local.isoformat(),
+            "timeZone": timezone_name,
+        },
+        "end": {
+            "dateTime": end_at_local.isoformat(),
+            "timeZone": timezone_name,
+        },
+    }
+
+    google_service = build(
+        "calendar",
+        "v3",
+        credentials=credentials,
+        cache_discovery=False,
+    )
+    result = (
+        google_service.events()
+        .insert(calendarId="primary", body=event_body)
+        .execute()
+    )
+    if isinstance(result, dict):
+        return result
+    return {}
+
+
 def _mock_user_events_in_range(
     range_start: date,
     range_end_exclusive: date,
@@ -432,6 +615,50 @@ def _load_user_events(
             _mock_user_events_in_range(range_start, range_end_exclusive),
             "Mock Calendar",
         )
+
+
+def _load_user_busy_periods_for_window(
+    window_start: datetime,
+    window_end: datetime,
+) -> list[tuple[datetime, datetime]]:
+    """Load user busy windows for scheduling conflict checks."""
+    credentials = _init_google_credentials()
+    if credentials is None:
+        return []
+
+    try:
+        return _google_user_busy_periods_for_window(
+            credentials,
+            window_start,
+            window_end,
+        )
+    except Exception:
+        flask.flash(
+            "Unable to check Google Calendar conflicts right now.",
+            "error",
+        )
+        return []
+
+
+def _busy_periods_for_day(
+    busy_periods: list[tuple[datetime, datetime]],
+    chosen_date: date,
+) -> list[tuple[datetime, datetime]]:
+    """Return the subset of busy periods that overlap a single day."""
+    day_start = datetime.combine(chosen_date, time.min)
+    day_end = day_start + timedelta(days=1)
+    day_periods: list[tuple[datetime, datetime]] = []
+
+    for busy_start, busy_end in busy_periods:
+        if busy_start < day_end and busy_end > day_start:
+            day_periods.append(
+                (
+                    max(day_start, busy_start),
+                    min(day_end, busy_end),
+                )
+            )
+
+    return day_periods
 
 
 def _week_start_for(raw_date: date) -> date:
@@ -643,6 +870,77 @@ def _selected_business_service(
     return business["services"][0]
 
 
+def _schedule_query_for_selection(
+    business: dict[str, Any],
+    service: dict[str, Any],
+    selected_date: date,
+) -> dict[str, str]:
+    """Build schedule query params for redirects and links."""
+    return {
+        "business_id": str(business["id"]),
+        "service_id": str(service["id"]),
+        "date": selected_date.isoformat(),
+    }
+
+
+def _schedule_url_for_query(schedule_query: dict[str, str]) -> str:
+    """Build the canonical schedule URL from selected query params."""
+    return flask.url_for(
+        "schedule",
+        business_id=schedule_query["business_id"],
+        service_id=schedule_query["service_id"],
+        date=schedule_query["date"],
+    )
+
+
+def _slot_reason_label(reason: str) -> str:
+    """Return the friendly label for a slot reason code."""
+    return SLOT_REASON_LABELS.get(reason, "Unavailable")
+
+
+def _next_bookable_slots_in_week(
+    business: dict[str, Any],
+    service: dict[str, Any],
+    selected_date: date,
+    user_busy_periods: list[tuple[datetime, datetime]],
+    limit: int = 3,
+) -> list[dict[str, str]]:
+    """Return up to ``limit`` upcoming intersection-available slots."""
+    week_end_exclusive = _week_start_for(selected_date) + timedelta(days=7)
+    current_date = selected_date
+    suggestions: list[dict[str, str]] = []
+
+    while current_date < week_end_exclusive and len(suggestions) < limit:
+        current_day_busy = _busy_periods_for_day(
+            user_busy_periods, current_date
+        )
+        day_slots = _build_business_day_slots(
+            business,
+            service,
+            current_date,
+            user_busy_periods=current_day_busy,
+        )
+
+        for slot in day_slots:
+            if not bool(slot.get("bookable")):
+                continue
+
+            suggestions.append(
+                {
+                    "day_label": current_date.strftime("%a, %b %d"),
+                    "time_label": str(slot["label"]),
+                    "start_time": str(slot["start_time"]),
+                    "date": current_date.isoformat(),
+                }
+            )
+            if len(suggestions) >= limit:
+                break
+
+        current_date += timedelta(days=1)
+
+    return suggestions
+
+
 def _mock_busy_periods(
     business_id: str,
     chosen_date: date,
@@ -667,6 +965,7 @@ def _build_business_day_slots(
     business: dict[str, Any],
     service: dict[str, Any],
     chosen_date: date,
+    user_busy_periods: list[tuple[datetime, datetime]] | None = None,
 ) -> list[dict[str, Any]]:
     """Generate available/unavailable slots for a business service and day."""
     open_weekdays = set(business["open_weekdays"])
@@ -676,7 +975,8 @@ def _build_business_day_slots(
     time_range = service["time_range"]
     opening = datetime.combine(chosen_date, _parse_clock(time_range["start"]))
     closing = datetime.combine(chosen_date, _parse_clock(time_range["end"]))
-    busy_periods = _mock_busy_periods(str(business["id"]), chosen_date)
+    business_busy_periods = _mock_busy_periods(str(business["id"]), chosen_date)
+    user_periods = user_busy_periods if user_busy_periods else []
 
     duration = timedelta(minutes=int(service["duration"]))
     step = timedelta(minutes=15)
@@ -685,10 +985,23 @@ def _build_business_day_slots(
 
     while current + duration <= closing:
         slot_end = current + duration
-        has_conflict = any(
+        has_business_conflict = any(
             current < busy_end and slot_end > busy_start
-            for busy_start, busy_end in busy_periods
+            for busy_start, busy_end in business_busy_periods
         )
+        has_user_conflict = any(
+            current < busy_end and slot_end > busy_start
+            for busy_start, busy_end in user_periods
+        )
+        if has_business_conflict and has_user_conflict:
+            reason = "both_busy"
+        elif has_business_conflict:
+            reason = "business_busy"
+        elif has_user_conflict:
+            reason = "user_busy"
+        else:
+            reason = "available"
+        bookable = reason == "available"
 
         slots.append(
             {
@@ -696,8 +1009,15 @@ def _build_business_day_slots(
                     f"{current.strftime('%I:%M %p').lstrip('0')} - "
                     f"{slot_end.strftime('%I:%M %p').lstrip('0')}"
                 ),
-                "available": not has_conflict,
-                "status": "Available" if not has_conflict else "Unavailable",
+                "start_time": current.strftime("%H:%M"),
+                "end_time": slot_end.strftime("%H:%M"),
+                "business_free": not has_business_conflict,
+                "user_free": not has_user_conflict,
+                "bookable": bookable,
+                "available": bookable,
+                "reason": reason,
+                "status_label": _slot_reason_label(reason),
+                "status": _slot_reason_label(reason),
             }
         )
         current += step
@@ -709,16 +1029,27 @@ def _build_week_preview(
     business: dict[str, Any],
     service: dict[str, Any],
     selected_date: date,
+    user_busy_periods: list[tuple[datetime, datetime]] | None = None,
 ) -> list[dict[str, Any]]:
     """Build a one-week status strip around the selected date."""
     week_start = selected_date - timedelta(days=selected_date.weekday())
     open_weekdays = set(business["open_weekdays"])
+    weekly_busy_periods = user_busy_periods if user_busy_periods else []
     week_days: list[dict[str, Any]] = []
 
     for offset in range(7):
         current_date = week_start + timedelta(days=offset)
-        day_slots = _build_business_day_slots(business, service, current_date)
-        available_count = sum(1 for slot in day_slots if slot["available"])
+        current_day_busy = _busy_periods_for_day(
+            weekly_busy_periods,
+            current_date,
+        )
+        day_slots = _build_business_day_slots(
+            business,
+            service,
+            current_date,
+            user_busy_periods=current_day_busy,
+        )
+        available_count = sum(1 for slot in day_slots if slot["bookable"])
 
         if current_date.weekday() not in open_weekdays:
             status = "closed"
@@ -755,6 +1086,61 @@ def _service_time_range_label(service: dict[str, Any]) -> str:
         f"{_clock_label(time_range['start'])} - "
         f"{_clock_label(time_range['end'])}"
     )
+
+
+def _schedule_view_context(
+    business_id: str | None,
+    service_id: str | None,
+    raw_date: str | None,
+) -> dict[str, Any]:
+    """Build shared schedule view data for HTML and JSON responses."""
+    selected_business = _selected_business(business_id)
+    selected_service = _selected_business_service(selected_business, service_id)
+    selected_date_value = _parse_iso_date(raw_date)
+
+    week_start = _week_start_for(selected_date_value)
+    week_end_exclusive = week_start + timedelta(days=7)
+    user_busy_periods = _load_user_busy_periods_for_window(
+        datetime.combine(week_start, time.min),
+        datetime.combine(week_end_exclusive, time.min),
+    )
+    week_days = _build_week_preview(
+        selected_business,
+        selected_service,
+        selected_date_value,
+        user_busy_periods=user_busy_periods,
+    )
+    selected_day_busy = _busy_periods_for_day(
+        user_busy_periods,
+        selected_date_value,
+    )
+    day_slots = _build_business_day_slots(
+        selected_business,
+        selected_service,
+        selected_date_value,
+        user_busy_periods=selected_day_busy,
+    )
+    available_count = sum(1 for slot in day_slots if slot["bookable"])
+    unavailable_count = len(day_slots) - available_count
+    next_available_slots = _next_bookable_slots_in_week(
+        selected_business,
+        selected_service,
+        selected_date_value,
+        user_busy_periods,
+    )
+
+    return {
+        "selected_business": selected_business,
+        "selected_service": selected_service,
+        "selected_date": selected_date_value.isoformat(),
+        "selected_date_human": selected_date_value.strftime("%A, %B %d, %Y"),
+        "selected_time_range": _service_time_range_label(selected_service),
+        "week_days": week_days,
+        "day_slots": day_slots,
+        "available_count": available_count,
+        "unavailable_count": unavailable_count,
+        "next_available_slots": next_available_slots,
+    }
 
 
 def create_app() -> Secretariat:
@@ -867,41 +1253,163 @@ def create_app() -> Secretariat:
             return sign_in_redirect
 
         request_values = flask.request.args
-        selected_business = _selected_business(
-            request_values.get("business_id")
-        )
-        selected_service = _selected_business_service(
-            selected_business,
+        schedule_context = _schedule_view_context(
+            request_values.get("business_id"),
             request_values.get("service_id"),
+            request_values.get("date"),
         )
-        selected_date = _parse_iso_date(request_values.get("date"))
-        week_days = _build_week_preview(
-            selected_business,
-            selected_service,
-            selected_date,
-        )
-        day_slots = _build_business_day_slots(
-            selected_business,
-            selected_service,
-            selected_date,
-        )
-        available_count = sum(1 for slot in day_slots if slot["available"])
-        unavailable_count = len(day_slots) - available_count
 
         return flask.render_template(
             "availability.html",
             title="Schedule",
             today=date.today().isoformat(),
             businesses=PULLMAN_BUSINESSES,
-            selected_business=selected_business,
-            selected_service=selected_service,
-            selected_date=selected_date.isoformat(),
-            selected_date_human=selected_date.strftime("%A, %B %d, %Y"),
-            selected_time_range=_service_time_range_label(selected_service),
-            week_days=week_days,
-            day_slots=day_slots,
-            available_count=available_count,
-            unavailable_count=unavailable_count,
+            **schedule_context,
         )
+
+    @app.get("/schedule/data")
+    def schedule_data() -> ResponseReturnValue:
+        """Return schedule view data without a full page reload."""
+        sign_in_redirect = _require_signed_in()
+        if sign_in_redirect is not None:
+            return sign_in_redirect
+
+        request_values = flask.request.args
+        schedule_context = _schedule_view_context(
+            request_values.get("business_id"),
+            request_values.get("service_id"),
+            request_values.get("date"),
+        )
+        return flask.jsonify(
+            {
+                "today": date.today().isoformat(),
+                "businesses": PULLMAN_BUSINESSES,
+                **schedule_context,
+            }
+        )
+
+    @app.post("/appointments")
+    def book_appointment() -> ResponseReturnValue:
+        """Book a selected appointment slot to the user's calendar."""
+        sign_in_redirect = _require_signed_in()
+        if sign_in_redirect is not None:
+            return sign_in_redirect
+
+        form_values = flask.request.form
+        selected_business = _selected_business(form_values.get("business_id"))
+        selected_service = _selected_business_service(
+            selected_business,
+            form_values.get("service_id"),
+        )
+        selected_date = _parse_iso_date(form_values.get("date"))
+        schedule_query = _schedule_query_for_selection(
+            selected_business,
+            selected_service,
+            selected_date,
+        )
+
+        slot_start_raw = _string_or_none(form_values.get("slot_start"))
+        if slot_start_raw is None:
+            flask.flash("Please choose a valid time slot.", "error")
+            return flask.redirect(
+                _schedule_url_for_query(schedule_query),
+            )
+
+        try:
+            slot_start = datetime.combine(
+                selected_date,
+                _parse_clock(slot_start_raw),
+            )
+        except ValueError:
+            flask.flash("Please choose a valid time slot.", "error")
+            return flask.redirect(
+                _schedule_url_for_query(schedule_query),
+            )
+
+        slot_end = slot_start + timedelta(
+            minutes=int(selected_service["duration"]),
+        )
+
+        week_start = _week_start_for(selected_date)
+        week_end_exclusive = week_start + timedelta(days=7)
+        user_busy_periods = _load_user_busy_periods_for_window(
+            datetime.combine(week_start, time.min),
+            datetime.combine(week_end_exclusive, time.min),
+        )
+        selected_day_busy = _busy_periods_for_day(
+            user_busy_periods,
+            selected_date,
+        )
+        day_slots = _build_business_day_slots(
+            selected_business,
+            selected_service,
+            selected_date,
+            user_busy_periods=selected_day_busy,
+        )
+        chosen_slot = next(
+            (
+                slot
+                for slot in day_slots
+                if slot.get("start_time") == slot_start_raw
+            ),
+            None,
+        )
+        if chosen_slot is None:
+            flask.flash(
+                "Selected slot is invalid for the chosen service.",
+                "error",
+            )
+            return flask.redirect(
+                _schedule_url_for_query(schedule_query),
+            )
+
+        if not bool(chosen_slot.get("bookable")):
+            flask.flash(
+                "Selected slot is no longer available. Pick another time.",
+                "error",
+            )
+            return flask.redirect(
+                _schedule_url_for_query(schedule_query),
+            )
+
+        credentials = _init_google_credentials()
+        if credentials is None:
+            flask.flash(
+                "Google session expired. Please sign in again.",
+                "error",
+            )
+            return flask.redirect(flask.url_for("index"))
+
+        try:
+            _create_google_primary_event(
+                credentials,
+                selected_business,
+                selected_service,
+                slot_start,
+                slot_end,
+            )
+        except Exception as error:
+            flask.current_app.logger.exception(
+                "Unable to create Google Calendar appointment: %s",
+                error,
+            )
+            flask.flash(
+                "Could not create Google Calendar appointment. Try again.",
+                "error",
+            )
+            return flask.redirect(
+                _schedule_url_for_query(schedule_query),
+            )
+
+        booked_day = selected_date.strftime("%a, %b %d")
+        booked_time = slot_start.strftime("%I:%M %p").lstrip("0")
+        service_name = (
+            _string_or_none(selected_service.get("name")) or "Service"
+        )
+        flask.flash(
+            f"Booked {service_name} on {booked_day} at {booked_time}.",
+            "success",
+        )
+        return flask.redirect(flask.url_for("home"))
 
     return app

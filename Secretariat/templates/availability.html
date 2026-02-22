@@ -10,11 +10,11 @@
       available and unavailable time slots.
     </p>
 
-    <form class="section" method="get">
+    <form id="schedule-controls" class="section" method="get" action="{{ url_for('schedule') }}">
       <div class="form-grid">
         <label class="field">
           <span class="field-label">Business</span>
-          <select name="business_id">
+          <select id="business-select" name="business_id">
             {% for business in businesses %}
               <option value="{{ business.id }}" {% if business.id == selected_business.id %}selected{% endif %}>
                 {{ business.name }}
@@ -25,7 +25,7 @@
 
         <label class="field">
           <span class="field-label">Service</span>
-          <select name="service_id">
+          <select id="service-select" name="service_id">
             {% for service in selected_business.services %}
               <option value="{{ service.id }}" {% if service.id == selected_service.id %}selected{% endif %}>
                 {{ service.name }} ({{ service.duration }} min)
@@ -37,6 +37,7 @@
         <label class="field">
           <span class="field-label">Date</span>
           <input
+            id="schedule-date"
             type="date"
             name="date"
             value="{{ selected_date }}"
@@ -46,11 +47,13 @@
       </div>
 
       <div class="section">
-        <button type="submit" class="button">Update Appointment Options</button>
+        <button id="schedule-update-button" type="submit" class="button">
+          Update Appointment Options
+        </button>
       </div>
     </form>
 
-    <div class="business-grid section">
+    <div id="business-grid" class="business-grid section">
       {% for business in businesses %}
         <article class="business-card{% if business.id == selected_business.id %} is-selected{% endif %}">
           <header class="business-head">
@@ -68,22 +71,23 @@
     </div>
   </section>
 
-  <section class="panel section">
-    <h2>{{ selected_business.name }}</h2>
-    <p class="calendar-meta">
+  <section id="schedule-detail-panel" class="panel section">
+    <h2 id="selected-business-title">{{ selected_business.name }}</h2>
+    <p id="selected-service-meta" class="calendar-meta">
       {{ selected_service.name }} · {{ selected_service.duration }} minutes ·
       Time range {{ selected_time_range }}
     </p>
-    <p class="calendar-meta">
+    <p id="selected-date-meta" class="calendar-meta">
       {{ selected_date_human }} · {{ available_count }} available ·
       {{ unavailable_count }} unavailable
     </p>
 
-    <div class="day-strip section">
+    <div id="day-strip" class="day-strip section">
       {% for day in week_days %}
         <a
           class="day-pill day-pill--{{ day.status }}{% if day.is_selected %} is-selected{% endif %}"
           href="{{ url_for('schedule', business_id=selected_business.id, service_id=selected_service.id, date=day.date) }}"
+          data-date="{{ day.date }}"
         >
           <span class="day-pill-weekday">{{ day.weekday }}</span>
           <span class="day-pill-day">{{ day.day_number }}</span>
@@ -92,28 +96,453 @@
       {% endfor %}
     </div>
 
-    <div class="slot-legend section">
-      <span class="legend-item"><span class="legend-dot legend-dot--open"></span>Open</span>
-      <span class="legend-item"><span class="legend-dot legend-dot--limited"></span>Limited</span>
-      <span class="legend-item"><span class="legend-dot legend-dot--full"></span>Full</span>
-      <span class="legend-item"><span class="legend-dot legend-dot--closed"></span>Closed</span>
+    <section class="next-slot-panel section">
+      <h3 class="next-slot-title">Next 3 available times</h3>
+      <div id="next-slot-body">
+        {% if next_available_slots %}
+          <div class="next-slot-list">
+            {% for next_slot in next_available_slots %}
+              <p class="next-slot-item">
+                <strong>{{ next_slot.day_label }}</strong> · {{ next_slot.time_label }}
+              </p>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="next-slot-empty">
+            No open slots remain this week for the selected service.
+          </p>
+        {% endif %}
+      </div>
+    </section>
+
+    <section
+      id="timeline-panel"
+      class="timeline-panel section{% if not day_slots %} is-hidden{% endif %}"
+      aria-label="Availability overlay"
+    >
+      <h3 class="timeline-title">Availability Overlay</h3>
+      <div class="timeline-row">
+        <p class="timeline-label">Business</p>
+        <div id="timeline-business-cells" class="timeline-cells">
+          {% for slot in day_slots %}
+            <span
+              class="timeline-cell {% if slot.business_free %}is-free{% else %}is-busy{% endif %}"
+              title="{{ slot.label }}"
+            ></span>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="timeline-row">
+        <p class="timeline-label">You</p>
+        <div id="timeline-user-cells" class="timeline-cells">
+          {% for slot in day_slots %}
+            <span
+              class="timeline-cell {% if slot.user_free %}is-free{% else %}is-busy{% endif %}"
+              title="{{ slot.label }}"
+            ></span>
+          {% endfor %}
+        </div>
+      </div>
+    </section>
+
+    <div id="slot-legend" class="slot-legend section{% if not day_slots %} is-hidden{% endif %}">
+      <span class="legend-item">
+        <span class="legend-dot legend-dot--slot-available"></span>
+        Available (both free)
+      </span>
+      <span class="legend-item">
+        <span class="legend-dot legend-dot--slot-user-busy"></span>
+        Unavailable - You are busy
+      </span>
+      <span class="legend-item">
+        <span class="legend-dot legend-dot--slot-business-busy"></span>
+        Unavailable - Business is busy
+      </span>
+      <span class="legend-item">
+        <span class="legend-dot legend-dot--slot-both-busy"></span>
+        Unavailable - Both busy
+      </span>
     </div>
 
-    {% if day_slots %}
-      <div class="demo-slot-grid section">
-        {% for slot in day_slots %}
+    <div id="slot-grid" class="demo-slot-grid section{% if not day_slots %} is-hidden{% endif %}">
+      {% for slot in day_slots %}
+        {% if slot.bookable %}
+          <form class="inline-form" method="post" action="{{ url_for('book_appointment') }}">
+            <input type="hidden" name="business_id" value="{{ selected_business.id }}" />
+            <input type="hidden" name="service_id" value="{{ selected_service.id }}" />
+            <input type="hidden" name="date" value="{{ selected_date }}" />
+            <input type="hidden" name="slot_start" value="{{ slot.start_time }}" />
+            <button class="demo-slot is-available" type="submit">
+              <span>{{ slot.label }}</span>
+              <small>{{ slot.status_label }}</small>
+            </button>
+          </form>
+        {% else %}
           <button
-            class="demo-slot{% if slot.available %} is-available{% else %} is-unavailable{% endif %}"
+            class="demo-slot is-unavailable is-{{ slot.reason | replace('_', '-') }}"
             type="button"
-            {% if not slot.available %}disabled{% endif %}
+            disabled
           >
             <span>{{ slot.label }}</span>
-            <small>{{ slot.status }}</small>
+            <small>{{ slot.status_label }}</small>
           </button>
-        {% endfor %}
-      </div>
-    {% else %}
-      <p class="section">This business is closed on the selected day.</p>
-    {% endif %}
+        {% endif %}
+      {% endfor %}
+    </div>
+
+    <p id="closed-message" class="section{% if day_slots %} is-hidden{% endif %}">
+      This business is closed on the selected day.
+    </p>
   </section>
+
+  <script>
+    (() => {
+      const scheduleDataUrl = "{{ url_for('schedule_data') }}";
+      const scheduleUrl = "{{ url_for('schedule') }}";
+      const bookAppointmentUrl = "{{ url_for('book_appointment') }}";
+      const fallbackToday = "{{ today }}";
+      const businesses = {{ businesses | tojson }};
+
+      const controlsForm = document.getElementById("schedule-controls");
+      const updateButton = document.getElementById("schedule-update-button");
+      const businessSelect = document.getElementById("business-select");
+      const serviceSelect = document.getElementById("service-select");
+      const dateInput = document.getElementById("schedule-date");
+      const businessGrid = document.getElementById("business-grid");
+
+      const detailPanel = document.getElementById("schedule-detail-panel");
+      const selectedBusinessTitle = document.getElementById("selected-business-title");
+      const selectedServiceMeta = document.getElementById("selected-service-meta");
+      const selectedDateMeta = document.getElementById("selected-date-meta");
+      const dayStrip = document.getElementById("day-strip");
+      const nextSlotBody = document.getElementById("next-slot-body");
+      const timelinePanel = document.getElementById("timeline-panel");
+      const timelineBusinessCells = document.getElementById("timeline-business-cells");
+      const timelineUserCells = document.getElementById("timeline-user-cells");
+      const slotLegend = document.getElementById("slot-legend");
+      const slotGrid = document.getElementById("slot-grid");
+      const closedMessage = document.getElementById("closed-message");
+
+      if (
+        !controlsForm
+        || !businessSelect
+        || !serviceSelect
+        || !dateInput
+        || !businessGrid
+        || !detailPanel
+        || !selectedBusinessTitle
+        || !selectedServiceMeta
+        || !selectedDateMeta
+        || !dayStrip
+        || !nextSlotBody
+        || !timelinePanel
+        || !timelineBusinessCells
+        || !timelineUserCells
+        || !slotLegend
+        || !slotGrid
+        || !closedMessage
+      ) {
+        return;
+      }
+
+      let inFlightController = null;
+
+      const escapeHtml = (value) =>
+        String(value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+
+      const queryStringFor = (state) =>
+        new URLSearchParams(state).toString();
+
+      const getBusinessById = (businessId) =>
+        businesses.find((business) => business.id === businessId)
+        || businesses[0];
+
+      const renderServiceOptions = (businessId, selectedServiceId) => {
+        const selectedBusiness = getBusinessById(businessId);
+        const fallbackServiceId = selectedBusiness.services[0]?.id || "";
+        const serviceExists = selectedBusiness.services.some(
+          (service) => service.id === selectedServiceId,
+        );
+        const resolvedServiceId = serviceExists
+          ? selectedServiceId
+          : fallbackServiceId;
+
+        serviceSelect.innerHTML = selectedBusiness.services
+          .map(
+            (service) =>
+              `<option value="${escapeHtml(service.id)}"${service.id === resolvedServiceId ? " selected" : ""}>`
+              + `${escapeHtml(service.name)} (${escapeHtml(service.duration)} min)</option>`,
+          )
+          .join("");
+        serviceSelect.value = resolvedServiceId;
+        return resolvedServiceId;
+      };
+
+      const renderBusinessCards = (selectedBusinessId) => {
+        businessGrid.innerHTML = businesses
+          .map((business) => {
+            const selectedClass = business.id === selectedBusinessId
+              ? " is-selected"
+              : "";
+            const serviceItems = business.services
+              .map(
+                (service) =>
+                  `<li>${escapeHtml(service.name)} (${escapeHtml(service.duration)} min)</li>`,
+              )
+              .join("");
+            return (
+              `<article class="business-card${selectedClass}">`
+              + `<header class="business-head">`
+              + `<h3 class="business-name">${escapeHtml(business.name)}</h3>`
+              + `<p class="business-location">${escapeHtml(business.location)}</p>`
+              + `</header>`
+              + `<p>${escapeHtml(business.description)}</p>`
+              + `<ul class="business-services">${serviceItems}</ul>`
+              + `</article>`
+            );
+          })
+          .join("");
+      };
+
+      const renderDayStrip = (weekDays, state) => {
+        dayStrip.innerHTML = weekDays
+          .map((day) => {
+            const selectedClass = day.is_selected ? " is-selected" : "";
+            const dayClass = `day-pill day-pill--${escapeHtml(day.status)}${selectedClass}`;
+            const href = `${scheduleUrl}?${queryStringFor({
+              business_id: state.business_id,
+              service_id: state.service_id,
+              date: day.date,
+            })}`;
+            return (
+              `<a class="${dayClass}" href="${href}" data-date="${escapeHtml(day.date)}">`
+              + `<span class="day-pill-weekday">${escapeHtml(day.weekday)}</span>`
+              + `<span class="day-pill-day">${escapeHtml(day.day_number)}</span>`
+              + `<span class="day-pill-status">${escapeHtml(day.status_label)}</span>`
+              + `</a>`
+            );
+          })
+          .join("");
+      };
+
+      const renderNextSlots = (nextSlots) => {
+        if (nextSlots.length === 0) {
+          return (
+            `<p class="next-slot-empty">`
+            + `No open slots remain this week for the selected service.`
+            + `</p>`
+          );
+        }
+
+        const rows = nextSlots
+          .map(
+            (slot) =>
+              `<p class="next-slot-item"><strong>${escapeHtml(slot.day_label)}</strong> · ${escapeHtml(slot.time_label)}</p>`,
+          )
+          .join("");
+        return `<div class="next-slot-list">${rows}</div>`;
+      };
+
+      const renderTimelineCells = (slots, key) =>
+        slots
+          .map((slot) => {
+            const stateClass = slot[key] ? "is-free" : "is-busy";
+            return (
+              `<span class="timeline-cell ${stateClass}" title="${escapeHtml(slot.label)}"></span>`
+            );
+          })
+          .join("");
+
+      const renderSlotGrid = (slots, state) =>
+        slots
+          .map((slot) => {
+            if (slot.bookable) {
+              return (
+                `<form class="inline-form" method="post" action="${bookAppointmentUrl}">`
+                + `<input type="hidden" name="business_id" value="${escapeHtml(state.business_id)}" />`
+                + `<input type="hidden" name="service_id" value="${escapeHtml(state.service_id)}" />`
+                + `<input type="hidden" name="date" value="${escapeHtml(state.date)}" />`
+                + `<input type="hidden" name="slot_start" value="${escapeHtml(slot.start_time)}" />`
+                + `<button class="demo-slot is-available" type="submit">`
+                + `<span>${escapeHtml(slot.label)}</span>`
+                + `<small>${escapeHtml(slot.status_label)}</small>`
+                + `</button>`
+                + `</form>`
+              );
+            }
+
+            const reasonClass = String(slot.reason || "").replace(/_/g, "-");
+            return (
+              `<button class="demo-slot is-unavailable is-${escapeHtml(reasonClass)}" type="button" disabled>`
+              + `<span>${escapeHtml(slot.label)}</span>`
+              + `<small>${escapeHtml(slot.status_label)}</small>`
+              + `</button>`
+            );
+          })
+          .join("");
+
+      const setLoading = (isLoading) => {
+        detailPanel.classList.toggle("is-loading", isLoading);
+      };
+
+      const stateFromControls = () => ({
+        business_id: businessSelect.value || businesses[0]?.id || "",
+        service_id: serviceSelect.value || "",
+        date: dateInput.value || fallbackToday,
+      });
+
+      const applyScheduleData = (data, options = {}) => {
+        const selectedBusinessId = data.selected_business?.id || businesses[0]?.id || "";
+        businessSelect.value = selectedBusinessId;
+        const resolvedServiceId = renderServiceOptions(
+          selectedBusinessId,
+          data.selected_service?.id || serviceSelect.value,
+        );
+
+        const state = {
+          business_id: selectedBusinessId,
+          service_id: resolvedServiceId,
+          date: data.selected_date || fallbackToday,
+        };
+
+        dateInput.value = state.date;
+        selectedBusinessTitle.textContent = data.selected_business?.name || "";
+        selectedServiceMeta.textContent = `${data.selected_service?.name || ""} · ${data.selected_service?.duration || ""} minutes · Time range ${data.selected_time_range || ""}`;
+        selectedDateMeta.textContent = `${data.selected_date_human || ""} · ${data.available_count || 0} available · ${data.unavailable_count || 0} unavailable`;
+
+        renderBusinessCards(selectedBusinessId);
+        renderDayStrip(data.week_days || [], state);
+        nextSlotBody.innerHTML = renderNextSlots(data.next_available_slots || []);
+
+        const slots = data.day_slots || [];
+        const hasSlots = slots.length > 0;
+
+        timelinePanel.classList.toggle("is-hidden", !hasSlots);
+        slotLegend.classList.toggle("is-hidden", !hasSlots);
+        slotGrid.classList.toggle("is-hidden", !hasSlots);
+        closedMessage.classList.toggle("is-hidden", hasSlots);
+
+        timelineBusinessCells.innerHTML = hasSlots
+          ? renderTimelineCells(slots, "business_free")
+          : "";
+        timelineUserCells.innerHTML = hasSlots
+          ? renderTimelineCells(slots, "user_free")
+          : "";
+        slotGrid.innerHTML = hasSlots
+          ? renderSlotGrid(slots, state)
+          : "";
+
+        if (options.updateHistory !== false) {
+          const nextUrl = `${scheduleUrl}?${queryStringFor(state)}`;
+          if (options.replaceHistory) {
+            window.history.replaceState(state, "", nextUrl);
+          } else {
+            window.history.pushState(state, "", nextUrl);
+          }
+        }
+      };
+
+      const loadScheduleData = async (state, options = {}) => {
+        if (!state.business_id) {
+          return;
+        }
+
+        if (inFlightController) {
+          inFlightController.abort();
+        }
+
+        const controller = new AbortController();
+        inFlightController = controller;
+        setLoading(true);
+
+        try {
+          const response = await fetch(
+            `${scheduleDataUrl}?${queryStringFor(state)}`,
+            {
+              headers: {
+                "X-Requested-With": "XMLHttpRequest",
+                Accept: "application/json",
+              },
+              signal: controller.signal,
+            },
+          );
+          if (!response.ok) {
+            throw new Error(`Request failed: ${response.status}`);
+          }
+
+          const payload = await response.json();
+          applyScheduleData(payload, options);
+        } catch (error) {
+          if (error instanceof DOMException && error.name === "AbortError") {
+            return;
+          }
+          window.location.href = `${scheduleUrl}?${queryStringFor(state)}`;
+        } finally {
+          if (inFlightController === controller) {
+            inFlightController = null;
+            setLoading(false);
+          }
+        }
+      };
+
+      const loadFromControls = () => {
+        const nextState = stateFromControls();
+        loadScheduleData(nextState, { updateHistory: true });
+      };
+
+      if (updateButton) {
+        updateButton.classList.add("is-hidden");
+      }
+
+      controlsForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        loadFromControls();
+      });
+
+      businessSelect.addEventListener("change", () => {
+        const newBusinessId = businessSelect.value;
+        renderServiceOptions(newBusinessId, "");
+        loadFromControls();
+      });
+
+      serviceSelect.addEventListener("change", () => {
+        loadFromControls();
+      });
+
+      dateInput.addEventListener("change", () => {
+        loadFromControls();
+      });
+
+      dayStrip.addEventListener("click", (event) => {
+        const dayPill = event.target.closest("a.day-pill[data-date]");
+        if (!dayPill) {
+          return;
+        }
+
+        event.preventDefault();
+        const targetDate = dayPill.getAttribute("data-date");
+        if (!targetDate) {
+          return;
+        }
+
+        dateInput.value = targetDate;
+        loadFromControls();
+      });
+
+      window.addEventListener("popstate", () => {
+        const params = new URLSearchParams(window.location.search);
+        const state = {
+          business_id: params.get("business_id") || businessSelect.value,
+          service_id: params.get("service_id") || serviceSelect.value,
+          date: params.get("date") || dateInput.value || fallbackToday,
+        };
+        loadScheduleData(state, { updateHistory: false });
+      });
+    })();
+  </script>
 {% endblock %}

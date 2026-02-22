@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import json
 import os
 import pathlib
 from typing import Callable
@@ -18,7 +19,10 @@ AUTH = flask.Blueprint(
     url_prefix="/",
 )
 
-SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
+SCOPES = [
+    "https://www.googleapis.com/auth/calendar.events",
+    "https://www.googleapis.com/auth/calendar.readonly",
+]
 CLIENT_SECRETS_FILE = pathlib.Path("credentials_web.json")
 # Local Flask development uses ``http://127.0.0.1`` callback URLs.
 os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
@@ -39,6 +43,53 @@ def _safe_redirect_target(raw_target: str | None) -> str:
         return _default_redirect_target()
 
     return raw_target
+
+
+def _env_redirect_uri() -> str | None:
+    """Return explicit callback URI when configured."""
+    raw_uri = os.environ.get("GOOGLE_OAUTH_REDIRECT_URI")
+    if not raw_uri:
+        return None
+    return raw_uri.strip() or None
+
+
+def _client_redirect_uris() -> list[str]:
+    """Load redirect URIs from OAuth client secrets file."""
+    try:
+        raw_data = CLIENT_SECRETS_FILE.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return []
+
+    try:
+        payload = json.loads(raw_data)
+    except json.JSONDecodeError:
+        return []
+
+    web_config = payload.get("web")
+    if not isinstance(web_config, dict):
+        return []
+
+    redirect_values = web_config.get("redirect_uris")
+    if not isinstance(redirect_values, list):
+        return []
+
+    return [value for value in redirect_values if isinstance(value, str)]
+
+
+def _oauth_redirect_uri() -> str:
+    """Resolve callback URI for Google OAuth."""
+    if (explicit_uri := _env_redirect_uri()) is not None:
+        return explicit_uri
+
+    generated_uri = flask.url_for("auth.oauth2callback", _external=True)
+    if generated_uri in _client_redirect_uris():
+        return generated_uri
+
+    configured_uris = _client_redirect_uris()
+    if configured_uris:
+        return configured_uris[0]
+
+    return generated_uri
 
 
 def _credential_string(credentials: object, field_name: str) -> str | None:
@@ -88,7 +139,9 @@ def login() -> ResponseReturnValue:
         )
         return flask.redirect(redirect_target)
 
-    flow.redirect_uri = flask.url_for("auth.oauth2callback", _external=True)
+    oauth_redirect_uri = _oauth_redirect_uri()
+    flow.redirect_uri = oauth_redirect_uri
+    flask.session["oauth_redirect_uri"] = oauth_redirect_uri
 
     authorization_url, state = flow.authorization_url(
         access_type="offline",
@@ -132,7 +185,13 @@ def oauth2callback() -> ResponseReturnValue:
         )
         return flask.redirect(redirect_target)
 
-    flow.redirect_uri = flask.url_for("auth.oauth2callback", _external=True)
+    stored_redirect_uri = flask.session.get("oauth_redirect_uri")
+    redirect_uri = (
+        stored_redirect_uri
+        if isinstance(stored_redirect_uri, str) and stored_redirect_uri
+        else _oauth_redirect_uri()
+    )
+    flow.redirect_uri = redirect_uri
 
     try:
         flow.fetch_token(authorization_response=flask.request.url)
@@ -141,9 +200,12 @@ def oauth2callback() -> ResponseReturnValue:
             "Google OAuth token exchange failed: %s",
             error,
         )
+        detail = str(error).strip()
+        detail_text = f" Details: {detail}" if detail else ""
         flask.flash(
             "Unable to complete Google authentication. "
-            "Verify your redirect URI and try again.",
+            f"Verify redirect URI ({redirect_uri}) and try again."
+            f"{detail_text}",
             "error",
         )
         return flask.redirect(redirect_target)
@@ -158,6 +220,7 @@ def oauth2callback() -> ResponseReturnValue:
         "scopes": _credential_scopes(credentials),
     }
     flask.session.pop("state", None)
+    flask.session.pop("oauth_redirect_uri", None)
     flask.flash("Google Calendar connected.", "success")
 
     return flask.redirect(redirect_target)
@@ -170,5 +233,6 @@ def logout() -> ResponseReturnValue:
     flask.session.pop("credentials", None)
     flask.session.pop("state", None)
     flask.session.pop("post_auth_redirect", None)
+    flask.session.pop("oauth_redirect_uri", None)
     flask.flash("Signed out.", "success")
     return flask.redirect(flask.url_for("index"))

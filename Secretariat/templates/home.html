@@ -6,26 +6,115 @@
   <section class="panel">
     <h1>Your Calendar</h1>
     <p class="section">
-      Here is your next-week calendar view from {{ calendar_source }}
-      ({{ range_start }} to {{ range_end }}).
+      Here is your {{ selected_view }}ly calendar view from
+      {{ calendar_source }}.
     </p>
 
-    {% if upcoming_events %}
-      <div class="event-grid section">
-        {% for event in upcoming_events %}
-          <article class="event-card">
-            <h3 class="event-title">{{ event.title }}</h3>
-            <p class="event-time">{{ event.time_label }}</p>
-            {% if event.location %}
-              <p class="event-location">{{ event.location }}</p>
-            {% endif %}
+    <div class="calendar-toolbar section">
+      <div class="calendar-view-switch" aria-label="Calendar view">
+        <a
+          class="btn {% if selected_view == 'week' %}btn-primary{% else %}btn-secondary{% endif %}"
+          href="{{ url_for('home', view='week', start=week_view_start) }}"
+        >
+          Week
+        </a>
+        <a
+          class="btn {% if selected_view == 'month' %}btn-primary{% else %}btn-secondary{% endif %}"
+          href="{{ url_for('home', view='month', start=month_view_start) }}"
+        >
+          Month
+        </a>
+      </div>
+
+      <div class="calendar-nav">
+        <a
+          class="btn btn-secondary"
+          href="{{ url_for('home', view=selected_view, start=prev_start) }}"
+        >
+          Prev
+        </a>
+        <a
+          class="btn btn-secondary"
+          href="{{ url_for('home', view=selected_view, start=today_start) }}"
+        >
+          Today
+        </a>
+        <a
+          class="btn btn-secondary"
+          href="{{ url_for('home', view=selected_view, start=next_start) }}"
+        >
+          Next
+        </a>
+      </div>
+    </div>
+
+    <p class="calendar-range-label">
+      {% if selected_view == "month" %}
+        {{ month_label }}
+      {% else %}
+        {{ range_start }} to {{ range_end }}
+      {% endif %}
+    </p>
+
+    {% if selected_view == "month" %}
+      <div class="month-weekday-row section">
+        {% for weekday in month_weekdays %}
+          <p class="month-weekday">{{ weekday }}</p>
+        {% endfor %}
+      </div>
+
+      <div class="month-calendar">
+        {% for day in month_cells %}
+          <article class="month-day{% if not day.is_in_month %} is-outside{% endif %}{% if day.is_today %} is-today{% endif %}">
+            <header class="month-day-head">
+              <p class="month-day-number">{{ day.day_number }}</p>
+            </header>
+
+            <div class="month-day-body">
+              {% if day.events %}
+                {% for event in day.events %}
+                  <article class="month-event">
+                    <p class="month-event-time">{{ event.slot_label }}</p>
+                    <p class="month-event-title">{{ event.title }}</p>
+                  </article>
+                {% endfor %}
+
+                {% if day.extra_count > 0 %}
+                  <p class="month-event-more">+{{ day.extra_count }} more</p>
+                {% endif %}
+              {% else %}
+                <p class="month-event-empty">No events</p>
+              {% endif %}
+            </div>
           </article>
         {% endfor %}
       </div>
     {% else %}
-      <p class="section">
-        Nothing is scheduled for the next week.
-      </p>
+      <div class="week-calendar section">
+        {% for day in week_columns %}
+          <article class="week-column{% if day.is_today %} is-today{% endif %}">
+            <header class="week-column-head">
+              <p class="week-column-weekday">{{ day.weekday }}</p>
+              <p class="week-column-date">{{ day.month_day }}</p>
+            </header>
+            <div class="week-column-body">
+              {% if day.events %}
+                {% for event in day.events %}
+                  <article class="week-event">
+                    <p class="week-event-time">{{ event.slot_label }}</p>
+                    <h3 class="week-event-title">{{ event.title }}</h3>
+                    {% if event.location %}
+                      <p class="week-event-location">{{ event.location }}</p>
+                    {% endif %}
+                  </article>
+                {% endfor %}
+              {% else %}
+                <p class="week-event-empty">No events</p>
+              {% endif %}
+            </div>
+          </article>
+        {% endfor %}
+      </div>
     {% endif %}
   </section>
 

@@ -108,6 +108,7 @@ PULLMAN_BUSINESSES: list[dict[str, Any]] = [
     },
 ]
 
+# Simulated busy templates for deterministic availability demos.
 BUSINESS_BUSY_TEMPLATES: dict[str, dict[int, list[tuple[str, str]]]] = {
     "crimson-cuts": {
         0: [("09:45", "10:30"), ("12:00", "13:00"), ("15:30", "16:30")],
@@ -133,6 +134,16 @@ BUSINESS_BUSY_TEMPLATES: dict[str, dict[int, list[tuple[str, str]]]] = {
         6: [("11:00", "12:00"), ("13:30", "14:30"), ("16:30", "17:30")],
     },
 }
+
+HOME_MONTH_WEEKDAYS: tuple[str, ...] = (
+    "Mon",
+    "Tue",
+    "Wed",
+    "Thu",
+    "Fri",
+    "Sat",
+    "Sun",
+)
 
 
 def _string_or_none(raw_value: object) -> str | None:
@@ -241,10 +252,56 @@ def _google_event_time_label(event: dict[str, Any]) -> str:
     return "Time unavailable"
 
 
-def _google_week_events(credentials: Credentials) -> list[dict[str, str]]:
-    """Read the next seven days of events from Google Calendar."""
-    now_utc = datetime.now(timezone.utc)
-    one_week_from_now = now_utc + timedelta(days=7)
+def _google_event_day_and_slot(
+    event: dict[str, Any],
+) -> tuple[str | None, str, int]:
+    """Return event day and a slot label for week-column rendering."""
+    start_info = event.get("start", {})
+    end_info = event.get("end", {})
+    if not isinstance(start_info, dict) or not isinstance(end_info, dict):
+        return None, "Time unavailable", 1440
+
+    start_datetime = _parse_google_datetime(
+        _string_or_none(start_info.get("dateTime"))
+    )
+    end_datetime = _parse_google_datetime(
+        _string_or_none(end_info.get("dateTime"))
+    )
+    if start_datetime and end_datetime:
+        sort_key = (start_datetime.hour * 60) + start_datetime.minute
+        slot_label = (
+            f"{_datetime_clock_label(start_datetime)} - "
+            f"{_datetime_clock_label(end_datetime)}"
+        )
+        return start_datetime.date().isoformat(), slot_label, sort_key
+
+    all_day_value = _string_or_none(start_info.get("date"))
+    if all_day_value:
+        try:
+            all_day_date = datetime.strptime(all_day_value, "%Y-%m-%d").date()
+            return all_day_date.isoformat(), "All day", -1
+        except ValueError:
+            return None, "All day", -1
+
+    return None, "Time unavailable", 1440
+
+
+def _google_events_in_range(
+    credentials: Credentials,
+    range_start: date,
+    range_end_exclusive: date,
+) -> list[dict[str, Any]]:
+    """Read events from Google Calendar for a date range."""
+    range_start_utc = datetime.combine(
+        range_start,
+        time.min,
+        tzinfo=timezone.utc,
+    )
+    range_end_utc = datetime.combine(
+        range_end_exclusive,
+        time.min,
+        tzinfo=timezone.utc,
+    )
     service = build(
         "calendar",
         "v3",
@@ -255,11 +312,11 @@ def _google_week_events(credentials: Credentials) -> list[dict[str, str]]:
         service.events()
         .list(
             calendarId="primary",
-            timeMin=now_utc.isoformat(),
-            timeMax=one_week_from_now.isoformat(),
+            timeMin=range_start_utc.isoformat(),
+            timeMax=range_end_utc.isoformat(),
             singleEvents=True,
             orderBy="startTime",
-            maxResults=30,
+            maxResults=250,
         )
         .execute()
     )
@@ -267,71 +324,270 @@ def _google_week_events(credentials: Credentials) -> list[dict[str, str]]:
     if not isinstance(raw_items, list):
         return []
 
-    events: list[dict[str, str]] = []
+    events: list[dict[str, Any]] = []
     for raw_item in raw_items:
         if not isinstance(raw_item, dict):
             continue
 
         title = _string_or_none(raw_item.get("summary")) or "Untitled Event"
         location = _string_or_none(raw_item.get("location")) or ""
+        day_iso, slot_label, sort_key = _google_event_day_and_slot(raw_item)
         events.append(
             {
                 "title": title,
                 "time_label": _google_event_time_label(raw_item),
                 "location": location,
+                "day_iso": day_iso or "",
+                "slot_label": slot_label,
+                "sort_key": sort_key,
             }
         )
 
     return events
 
 
-def _mock_user_week_events(today: date) -> list[dict[str, str]]:
-    """Build deterministic fallback events for the user dashboard."""
-    week_start = today - timedelta(days=today.weekday())
-    templates = [
+def _mock_user_events_in_range(
+    range_start: date,
+    range_end_exclusive: date,
+) -> list[dict[str, Any]]:
+    """Build deterministic fallback events for home calendar ranges."""
+    templates: list[tuple[str, int, int, int, int, str]] = [
         ("Study Group", 0, 9, 30, 60, "Holland Library"),
         ("Office Hours", 1, 13, 0, 45, "Spark 223"),
         ("Gym Session", 2, 18, 0, 90, "Student Rec Center"),
         ("Team Sync", 3, 15, 30, 30, "Zoom"),
         ("Dinner with Friends", 5, 19, 0, 120, "Downtown Pullman"),
     ]
-    events: list[dict[str, str]] = []
+    events: list[dict[str, Any]] = []
 
-    for title, day_offset, hour, minute, duration, location in templates:
-        start_time = datetime.combine(
-            week_start + timedelta(days=day_offset),
-            time(hour=hour, minute=minute),
-        )
-        end_time = start_time + timedelta(minutes=duration)
-        events.append(
-            {
-                "title": title,
-                "time_label": (
-                    f"{start_time.strftime('%a, %b %d')} · "
-                    f"{_datetime_clock_label(start_time)} - "
-                    f"{_datetime_clock_label(end_time)}"
-                ),
-                "location": location,
-            }
-        )
+    current_day = range_start
+    while current_day < range_end_exclusive:
+        for (
+            title,
+            weekday,
+            hour,
+            minute,
+            duration,
+            location,
+        ) in templates:
+            if current_day.weekday() != weekday:
+                continue
+
+            start_time = datetime.combine(
+                current_day,
+                time(hour=hour, minute=minute),
+            )
+            end_time = start_time + timedelta(minutes=duration)
+            events.append(
+                {
+                    "title": title,
+                    "time_label": (
+                        f"{start_time.strftime('%a, %b %d')} · "
+                        f"{_datetime_clock_label(start_time)} - "
+                        f"{_datetime_clock_label(end_time)}"
+                    ),
+                    "location": location,
+                    "day_iso": start_time.date().isoformat(),
+                    "slot_label": (
+                        f"{_datetime_clock_label(start_time)} - "
+                        f"{_datetime_clock_label(end_time)}"
+                    ),
+                    "sort_key": (start_time.hour * 60) + start_time.minute,
+                }
+            )
+
+        current_day += timedelta(days=1)
 
     return events
 
 
-def _load_user_week_events(today: date) -> tuple[list[dict[str, str]], str]:
-    """Get user events from Google when possible, otherwise fallback mock."""
+def _load_user_events(
+    range_start: date,
+    range_end_exclusive: date,
+) -> tuple[list[dict[str, Any]], str]:
+    """Load user events for a requested range with fallback data."""
     credentials = _init_google_credentials()
     if credentials is None:
-        return _mock_user_week_events(today), "Mock Calendar"
+        return (
+            _mock_user_events_in_range(range_start, range_end_exclusive),
+            "Mock Calendar",
+        )
 
     try:
-        return _google_week_events(credentials), "Google Calendar"
+        return (
+            _google_events_in_range(
+                credentials,
+                range_start,
+                range_end_exclusive,
+            ),
+            "Google Calendar",
+        )
     except Exception:
         flask.flash(
             "Unable to read Google Calendar right now. Showing mock events.",
             "error",
         )
-        return _mock_user_week_events(today), "Mock Calendar"
+        return (
+            _mock_user_events_in_range(range_start, range_end_exclusive),
+            "Mock Calendar",
+        )
+
+
+def _week_start_for(raw_date: date) -> date:
+    """Normalize a date to the Monday of its week."""
+    return raw_date - timedelta(days=raw_date.weekday())
+
+
+def _month_start_for(raw_date: date) -> date:
+    """Normalize a date to the first of its month."""
+    return raw_date.replace(day=1)
+
+
+def _home_calendar_view(raw_view: str | None) -> str:
+    """Return the supported home calendar view."""
+    return raw_view if raw_view in {"week", "month"} else "week"
+
+
+def _parse_iso_date_or_none(raw_date: str | None) -> date | None:
+    """Parse an ISO date string when valid."""
+    if not raw_date:
+        return None
+
+    try:
+        return datetime.strptime(raw_date, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def _home_period_start(raw_start: str | None, view: str, today: date) -> date:
+    """Resolve and normalize the calendar period start date."""
+    parsed_start = _parse_iso_date_or_none(raw_start)
+    anchor = parsed_start if parsed_start is not None else today
+    if view == "month":
+        return _month_start_for(anchor)
+    return _week_start_for(anchor)
+
+
+def _shift_month(month_start: date, month_delta: int) -> date:
+    """Shift a month-first date by a number of months."""
+    month_index = (month_start.year * 12) + (month_start.month - 1)
+    shifted_index = month_index + month_delta
+    shifted_year, shifted_month_zero = divmod(shifted_index, 12)
+    return date(shifted_year, shifted_month_zero + 1, 1)
+
+
+def _home_period_end_exclusive(view: str, period_start: date) -> date:
+    """Return exclusive end date for home calendar view windows."""
+    if view == "month":
+        return _shift_month(period_start, 1)
+    return period_start + timedelta(days=7)
+
+
+def _home_neighbor_start(view: str, period_start: date, step: int) -> date:
+    """Return period start for previous/next navigation."""
+    if view == "month":
+        return _shift_month(period_start, step)
+    return period_start + timedelta(days=7 * step)
+
+
+def _home_events_by_day(
+    events: list[dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    """Group events by day with stable in-day sorting."""
+    events_by_day: dict[str, list[dict[str, Any]]] = {}
+    for event in events:
+        day_iso = _string_or_none(event.get("day_iso"))
+        if day_iso is None:
+            continue
+
+        raw_sort_key = event.get("sort_key")
+        sort_key = raw_sort_key if isinstance(raw_sort_key, int) else 9999
+        slot_label = _string_or_none(event.get("slot_label"))
+        if slot_label is None:
+            slot_label = (
+                _string_or_none(event.get("time_label")) or "Time unavailable"
+            )
+
+        day_events = events_by_day.setdefault(day_iso, [])
+        day_events.append(
+            {
+                "title": _string_or_none(event.get("title"))
+                or "Untitled Event",
+                "slot_label": slot_label,
+                "location": _string_or_none(event.get("location")) or "",
+                "sort_key": sort_key,
+            }
+        )
+
+    for day_events in events_by_day.values():
+        day_events.sort(
+            key=lambda event: (
+                event["sort_key"],
+                str(event["title"]).lower(),
+            )
+        )
+
+    return events_by_day
+
+
+def _home_week_columns(
+    week_start: date,
+    today: date,
+    events: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Build Monday-Sunday columns and place events under each day."""
+    events_by_day = _home_events_by_day(events)
+    columns: list[dict[str, Any]] = []
+
+    for day_offset in range(7):
+        current_day = week_start + timedelta(days=day_offset)
+        day_iso = current_day.isoformat()
+        columns.append(
+            {
+                "day_iso": day_iso,
+                "weekday": current_day.strftime("%A"),
+                "month_day": current_day.strftime("%b %d"),
+                "is_today": current_day == today,
+                "events": events_by_day.get(day_iso, []),
+            }
+        )
+
+    return columns
+
+
+def _home_month_cells(
+    month_start: date,
+    today: date,
+    events: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Build month cells including adjacent days to complete week rows."""
+    events_by_day = _home_events_by_day(events)
+    month_end_exclusive = _shift_month(month_start, 1)
+    month_last_day = month_end_exclusive - timedelta(days=1)
+
+    first_grid_day = _week_start_for(month_start)
+    last_grid_day = month_last_day + timedelta(
+        days=(6 - month_last_day.weekday())
+    )
+
+    cells: list[dict[str, Any]] = []
+    current_day = first_grid_day
+    while current_day <= last_grid_day:
+        day_iso = current_day.isoformat()
+        day_events = events_by_day.get(day_iso, [])
+        cells.append(
+            {
+                "day_iso": day_iso,
+                "day_number": current_day.day,
+                "is_today": current_day == today,
+                "is_in_month": current_day.month == month_start.month,
+                "events": day_events[:3],
+                "extra_count": max(0, len(day_events) - 3),
+            }
+        )
+        current_day += timedelta(days=1)
+
+    return cells
 
 
 def _load_secret_key() -> str:
@@ -348,13 +604,10 @@ def _load_secret_key() -> str:
 
 def _parse_iso_date(raw_date: str | None) -> date:
     """Parse a date string from form/query values."""
-    if not raw_date:
+    parsed_date = _parse_iso_date_or_none(raw_date)
+    if parsed_date is None:
         return date.today()
-
-    try:
-        return datetime.strptime(raw_date, "%Y-%m-%d").date()
-    except ValueError:
-        return date.today()
+    return parsed_date
 
 
 def _parse_clock(raw_clock: str) -> time:
@@ -532,15 +785,65 @@ def create_app() -> Secretariat:
         if sign_in_redirect is not None:
             return sign_in_redirect
 
+        request_values = flask.request.args
         today = date.today()
-        upcoming_events, calendar_source = _load_user_week_events(today)
+        selected_view = _home_calendar_view(request_values.get("view"))
+        period_start = _home_period_start(
+            request_values.get("start"),
+            selected_view,
+            today,
+        )
+        period_end_exclusive = _home_period_end_exclusive(
+            selected_view,
+            period_start,
+        )
+        period_end = period_end_exclusive - timedelta(days=1)
+
+        calendar_events, calendar_source = _load_user_events(
+            period_start,
+            period_end_exclusive,
+        )
+
+        week_columns: list[dict[str, Any]] = []
+        month_cells: list[dict[str, Any]] = []
+        if selected_view == "month":
+            month_cells = _home_month_cells(
+                period_start,
+                today,
+                calendar_events,
+            )
+        else:
+            week_columns = _home_week_columns(
+                period_start,
+                today,
+                calendar_events,
+            )
+
+        today_start = _home_period_start(
+            today.isoformat(),
+            selected_view,
+            today,
+        )
+        prev_start = _home_neighbor_start(selected_view, period_start, -1)
+        next_start = _home_neighbor_start(selected_view, period_start, 1)
+
         return flask.render_template(
             "home.html",
             title="Home",
-            range_start=today.strftime("%B %d, %Y"),
-            range_end=(today + timedelta(days=7)).strftime("%B %d, %Y"),
-            upcoming_events=upcoming_events,
+            selected_view=selected_view,
+            range_start=period_start.strftime("%B %d, %Y"),
+            range_end=period_end.strftime("%B %d, %Y"),
+            month_label=period_start.strftime("%B %Y"),
+            week_view_start=_week_start_for(period_start).isoformat(),
+            month_view_start=_month_start_for(period_start).isoformat(),
+            prev_start=prev_start.isoformat(),
+            next_start=next_start.isoformat(),
+            today_start=today_start.isoformat(),
+            month_weekdays=HOME_MONTH_WEEKDAYS,
             calendar_source=calendar_source,
+            upcoming_events=calendar_events,
+            week_columns=week_columns,
+            month_cells=month_cells,
         )
 
     @app.route("/schedule")

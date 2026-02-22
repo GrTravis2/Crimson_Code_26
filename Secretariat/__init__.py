@@ -8,6 +8,12 @@ from datetime import date, datetime, time, timedelta
 from typing import Any
 
 import flask
+
+from secretariat.app import Secretariat
+from secretariat.controllers.auth import AUTH
+from secretariat.controllers.home import HOME
+
+
 from google.oauth2.credentials import Credentials
 
 from Secretariat.app import Secretariat
@@ -21,11 +27,12 @@ SERVICE_OPTIONS: list[dict[str, Any]] = [
         "duration": 90,
     },
 ]
-
-
-def _init_google_credentials() -> Credentials:
-    """Set up credentials for Google API use."""
-    raise NotImplementedError
+ 
+def _get_client_id() -> str | None:
+    """For setting up credendials to work with google api."""
+    with pathlib.Path("credentials_web.json").open(encoding="utf-8") as f:
+        raw: dict[str, str] = json.loads(f.read())
+        return raw.get("client_id")
 
 
 def _load_secret_key() -> str:
@@ -125,6 +132,9 @@ def create_app() -> Secretariat:
         """Render the landing page."""
         return flask.render_template("index.html", title="Home")
 
+    os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"  # only for local testing
+    app.register_blueprint(HOME)
+    app.register_blueprint(AUTH)
     @app.route("/availability", methods=["GET", "POST"])
     def availability() -> str:
         """Render an availability UI with Jinja."""
@@ -149,6 +159,18 @@ def create_app() -> Secretariat:
                     "success",
                 )
 
+    # create index page to start on
+    @app.route("/")
+    def index():
+        client_id = _get_client_id()
+        oauth_url = (
+            "https://accounts.google.com/o/oauth2/v2/auth?"
+            f"client_id={client_id}"
+            f"&redirect_uri={flask.url_for('auth.login')}"
+            "&response_type=code"
+            "&scope=https://www.googleapis.com/auth/calendar.readonly"
+            "&access_type=offline"
+            "&prompt=consent"
         return flask.render_template(
             "availability.html",
             today=date.today().isoformat(),
@@ -159,5 +181,6 @@ def create_app() -> Secretariat:
             slots=slots,
             selected_slot=selected_slot,
         )
+        return flask.redirect(oauth_url)
 
     return app

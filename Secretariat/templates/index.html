@@ -1,12 +1,25 @@
-<!DOCTYPE html>
-<html lang="en" class="h-full">
-    <head>
-        <!-- TAB TITLE -->
-        <title>{{title}}</title>
-        <link href="{{ url_for('static', filename='style.css')}}" rel="stylesheet">
-    </head>
+{% extends "base.html" %}
 
-    <body class="h-full flex flex-col">
-        <strong>hello!</strong>
-    </body>
-</html>
+{% block title %}{{ title }} | Secretariat{% endblock %}
+
+{% block content %}
+  <section class="card hero-card hero-centered">
+    <p class="eyebrow">Why We Built This</p>
+    <h1>
+      No one likes making a phone call to set up
+      <span class="hero-title-break">an appointment.</span>
+    </h1>
+    <p class="body-copy section">
+      We don't enjoy making phone calls just to book an appointment, so for this
+      hackathon we built a deterministic scheduling flow with the Google Calendar
+      API. Instead of taking an agentic AI route, we wanted a system we could
+      understand and control end to end.
+    </p>
+
+    <div class="hero-actions">
+      <a class="btn btn-primary" href="{{ url_for('availability') }}">
+        Open Availability UI
+      </a>
+    </div>
+  </section>
+{% endblock %}

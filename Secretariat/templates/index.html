@@ -15,11 +15,13 @@
       API. Instead of taking an agentic AI route, we wanted a system we could
       understand and control end to end.
     </p>
-
     <div class="hero-actions">
-      <a class="btn btn-primary" href="{{ url_for('home.availability') }}">
-        Open Availability UI
-      </a>
+      <form class="inline-form" method="post" action="{{ url_for('auth.login') }}">
+        <input type="hidden" name="next" value="{{ url_for('home') }}" />
+        <button class="btn btn-primary" type="submit">
+          Login / Sign Up
+        </button>
+      </form>
     </div>
   </section>
 {% endblock %}

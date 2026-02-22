@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }} | Secretariat{% endblock %}
+
+{% block content %}
+  <section class="panel">
+    <h1>Your Calendar</h1>
+    <p class="section">
+      Here is your next-week calendar view from {{ calendar_source }}
+      ({{ range_start }} to {{ range_end }}).
+    </p>
+
+    {% if upcoming_events %}
+      <div class="event-grid section">
+        {% for event in upcoming_events %}
+          <article class="event-card">
+            <h3 class="event-title">{{ event.title }}</h3>
+            <p class="event-time">{{ event.time_label }}</p>
+            {% if event.location %}
+              <p class="event-location">{{ event.location }}</p>
+            {% endif %}
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="section">
+        Nothing is scheduled for the next week.
+      </p>
+    {% endif %}
+  </section>
+
+  <section class="panel section">
+    <h2>Set Up Appointment</h2>
+    <p class="section">
+      Choose a business, select a service, and pick an available time slot.
+    </p>
+    <div class="section">
+      <a class="btn btn-primary" href="{{ url_for('schedule') }}">
+        Set Up Appointment
+      </a>
+    </div>
+  </section>
+{% endblock %}

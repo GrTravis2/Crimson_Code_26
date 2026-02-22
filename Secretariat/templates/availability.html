@@ -1,14 +1,39 @@
 {% extends "base.html" %}
 
-{% block title %}Availability | Secretariat{% endblock %}
+{% block title %}{{ title }} | Secretariat{% endblock %}
 
 {% block content %}
   <section class="panel">
-    <h1>Calendar Availability</h1>
-    <p>Choose a date and service to load open appointment windows.</p>
+    <h1>Set Up Appointment</h1>
+    <p class="section">
+      Choose a Pullman business, select a service, and pick a date to review
+      available and unavailable time slots.
+    </p>
 
     <form class="section" method="get">
       <div class="form-grid">
+        <label class="field">
+          <span class="field-label">Business</span>
+          <select name="business_id">
+            {% for business in businesses %}
+              <option value="{{ business.id }}" {% if business.id == selected_business.id %}selected{% endif %}>
+                {{ business.name }}
+              </option>
+            {% endfor %}
+          </select>
+        </label>
+
+        <label class="field">
+          <span class="field-label">Service</span>
+          <select name="service_id">
+            {% for service in selected_business.services %}
+              <option value="{{ service.id }}" {% if service.id == selected_service.id %}selected{% endif %}>
+                {{ service.name }} ({{ service.duration }} min)
+              </option>
+            {% endfor %}
+          </select>
+        </label>
+
         <label class="field">
           <span class="field-label">Date</span>
           <input
@@ -18,48 +43,77 @@
             min="{{ today }}"
           />
         </label>
-
-        <label class="field">
-          <span class="field-label">Service</span>
-          <select name="service_id">
-            {% for service in services %}
-              <option value="{{ service.id }}" {% if service.id == selected_service.id %}selected{% endif %}>
-                {{ service.label }}
-              </option>
-            {% endfor %}
-          </select>
-        </label>
       </div>
 
       <div class="section">
-        <button type="submit" class="button">Load Slots</button>
+        <button type="submit" class="button">Update Appointment Options</button>
       </div>
     </form>
+
+    <div class="business-grid section">
+      {% for business in businesses %}
+        <article class="business-card{% if business.id == selected_business.id %} is-selected{% endif %}">
+          <header class="business-head">
+            <h3 class="business-name">{{ business.name }}</h3>
+            <p class="business-location">{{ business.location }}</p>
+          </header>
+          <p>{{ business.description }}</p>
+          <ul class="business-services">
+            {% for service in business.services %}
+              <li>{{ service.name }} ({{ service.duration }} min)</li>
+            {% endfor %}
+          </ul>
+        </article>
+      {% endfor %}
+    </div>
   </section>
 
   <section class="panel section">
-    <h2>{{ selected_service.label }}</h2>
-    <p class="section">{{ selected_date_human }}</p>
+    <h2>{{ selected_business.name }}</h2>
+    <p class="calendar-meta">
+      {{ selected_service.name }} · {{ selected_service.duration }} minutes ·
+      Time range {{ selected_time_range }}
+    </p>
+    <p class="calendar-meta">
+      {{ selected_date_human }} · {{ available_count }} available ·
+      {{ unavailable_count }} unavailable
+    </p>
 
-    {% if slots %}
-      <form method="post">
-        <input type="hidden" name="date" value="{{ selected_date }}" />
-        <input type="hidden" name="service_id" value="{{ selected_service.id }}" />
-        <div class="slot-grid">
-          {% for slot in slots %}
-            <button
-              class="slot-btn{% if slot.value == selected_slot %} is-selected{% endif %}"
-              type="submit"
-              name="slot"
-              value="{{ slot.value }}"
-            >
-              {{ slot.label }}
-            </button>
-          {% endfor %}
-        </div>
-      </form>
+    <div class="day-strip section">
+      {% for day in week_days %}
+        <a
+          class="day-pill day-pill--{{ day.status }}{% if day.is_selected %} is-selected{% endif %}"
+          href="{{ url_for('schedule', business_id=selected_business.id, service_id=selected_service.id, date=day.date) }}"
+        >
+          <span class="day-pill-weekday">{{ day.weekday }}</span>
+          <span class="day-pill-day">{{ day.day_number }}</span>
+          <span class="day-pill-status">{{ day.status_label }}</span>
+        </a>
+      {% endfor %}
+    </div>
+
+    <div class="slot-legend section">
+      <span class="legend-item"><span class="legend-dot legend-dot--open"></span>Open</span>
+      <span class="legend-item"><span class="legend-dot legend-dot--limited"></span>Limited</span>
+      <span class="legend-item"><span class="legend-dot legend-dot--full"></span>Full</span>
+      <span class="legend-item"><span class="legend-dot legend-dot--closed"></span>Closed</span>
+    </div>
+
+    {% if day_slots %}
+      <div class="demo-slot-grid section">
+        {% for slot in day_slots %}
+          <button
+            class="demo-slot{% if slot.available %} is-available{% else %} is-unavailable{% endif %}"
+            type="button"
+            {% if not slot.available %}disabled{% endif %}
+          >
+            <span>{{ slot.label }}</span>
+            <small>{{ slot.status }}</small>
+          </button>
+        {% endfor %}
+      </div>
     {% else %}
-      <p>No open blocks for this date. Try a different day.</p>
+      <p class="section">This business is closed on the selected day.</p>
     {% endif %}
   </section>
 {% endblock %}

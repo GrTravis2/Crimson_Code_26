@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block title %}Availability | Secretariat{% endblock %}
+
+{% block content %}
+  <section class="panel">
+    <h1>Calendar Availability</h1>
+    <p>Choose a date and service to load open appointment windows.</p>
+
+    <form class="section" method="get">
+      <div class="form-grid">
+        <label class="field">
+          <span class="field-label">Date</span>
+          <input
+            type="date"
+            name="date"
+            value="{{ selected_date }}"
+            min="{{ today }}"
+          />
+        </label>
+
+        <label class="field">
+          <span class="field-label">Service</span>
+          <select name="service_id">
+            {% for service in services %}
+              <option value="{{ service.id }}" {% if service.id == selected_service.id %}selected{% endif %}>
+                {{ service.label }}
+              </option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+
+      <div class="section">
+        <button type="submit" class="button">Load Slots</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="panel section">
+    <h2>{{ selected_service.label }}</h2>
+    <p class="section">{{ selected_date_human }}</p>
+
+    {% if slots %}
+      <form method="post">
+        <input type="hidden" name="date" value="{{ selected_date }}" />
+        <input type="hidden" name="service_id" value="{{ selected_service.id }}" />
+        <div class="slot-grid">
+          {% for slot in slots %}
+            <button
+              class="slot-btn{% if slot.value == selected_slot %} is-selected{% endif %}"
+              type="submit"
+              name="slot"
+              value="{{ slot.value }}"
+            >
+              {{ slot.label }}
+            </button>
+          {% endfor %}
+        </div>
+      </form>
+    {% else %}
+      <p>No open blocks for this date. Try a different day.</p>
+    {% endif %}
+  </section>
+{% endblock %}

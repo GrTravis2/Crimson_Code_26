@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}Secretariat{% endblock %}</title>
+    <style>
+      :root {
+        --bg: #f8fafc;
+        --surface: #ffffff;
+        --border: #e2e8f0;
+        --text-primary: #0f172a;
+        --text-secondary: #475569;
+        --muted: #94a3b8;
+        --teal: #0f766e;
+        --teal-hover: #115e59;
+        --wsu-crimson: #981e32;
+        --wsu-crimson-hover: #7a1829;
+        --danger: #b91c1c;
+
+        --space-1: 8px;
+        --space-2: 16px;
+        --space-3: 24px;
+        --space-4: 32px;
+        --space-5: 48px;
+        --space-6: 64px;
+
+        --radius-card: 16px;
+        --radius-step: 14px;
+        --radius-btn: 10px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        color: var(--text-primary);
+        font-family: Inter, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        background-color: var(--bg);
+        background-image:
+          radial-gradient(circle at 8% 5%, #0f766e12 0%, #0f766e00 28%),
+          radial-gradient(circle at 92% 0%, #0f172a0d 0%, #0f172a00 22%);
+      }
+
+      .page {
+        width: min(1248px, calc(100% - 192px));
+        margin: 0 auto;
+        padding: var(--space-3) 0 var(--space-6);
+      }
+
+      .top-nav {
+        height: 72px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-2);
+        margin-bottom: var(--space-5);
+        position: relative;
+      }
+
+      .brand {
+        font-size: 1.25rem;
+        line-height: 1.5rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        letter-spacing: 0.01em;
+        position: absolute;
+        left: 50%;
+        transform: translateX(-50%);
+      }
+
+      .nav-actions {
+        display: flex;
+        gap: var(--space-2);
+        align-items: center;
+        margin-left: auto;
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 44px;
+        padding: 12px 16px;
+        border-radius: var(--radius-btn);
+        border: 1px solid transparent;
+        text-decoration: none;
+        font-size: 14px;
+        line-height: 20px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .btn-primary {
+        background: var(--wsu-crimson);
+        color: #ffffff;
+      }
+
+      .btn-primary:hover {
+        background: var(--wsu-crimson-hover);
+      }
+
+      .btn-secondary {
+        background: var(--surface);
+        color: var(--text-secondary);
+        border-color: var(--border);
+      }
+
+      .btn-secondary:hover {
+        color: var(--text-primary);
+      }
+
+      a.button,
+      button.button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 44px;
+        padding: 12px 16px;
+        border-radius: var(--radius-btn);
+        border: 1px solid transparent;
+        text-decoration: none;
+        font-size: 14px;
+        line-height: 20px;
+        font-weight: 600;
+        cursor: pointer;
+        background: var(--wsu-crimson);
+        color: #ffffff;
+      }
+
+      a.button:hover,
+      button.button:hover {
+        background: var(--wsu-crimson-hover);
+      }
+
+      .card,
+      .panel {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-card);
+        padding: var(--space-5);
+        box-shadow: 0 6px 24px #0f172a0a;
+      }
+
+      .hero-card {
+        width: min(100%, 960px);
+        margin: 0 auto;
+      }
+
+      .hero-centered {
+        text-align: center;
+      }
+
+      .hero-centered .body-copy {
+        margin-left: auto;
+        margin-right: auto;
+      }
+
+      .hero-centered .hero-actions {
+        align-items: center;
+      }
+
+      .hero-title-break {
+        display: block;
+      }
+
+      .eyebrow {
+        margin: 0 0 var(--space-2);
+        color: var(--text-primary);
+        font-size: 12px;
+        line-height: 16px;
+        font-weight: 500;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      h1,
+      .h1 {
+        margin: 0;
+        font-size: 44px;
+        line-height: 52px;
+        font-weight: 600;
+        letter-spacing: -0.015em;
+      }
+
+      h2,
+      .h2 {
+        margin: 0;
+        font-size: 24px;
+        line-height: 32px;
+        font-weight: 600;
+      }
+
+      p,
+      li {
+        margin: 0;
+        font-size: 16px;
+        line-height: 26px;
+        color: var(--text-secondary);
+      }
+
+      .body-copy {
+        max-width: 66ch;
+      }
+
+      .section {
+        margin-top: var(--space-4);
+      }
+
+      .section-title {
+        margin-bottom: var(--space-3);
+      }
+
+      .hero-actions {
+        margin-top: var(--space-4);
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--space-2);
+      }
+
+      .link-inline {
+        color: var(--text-secondary);
+        text-decoration: none;
+        font-size: 14px;
+        line-height: 20px;
+        font-weight: 500;
+      }
+
+      .link-inline:hover {
+        color: var(--text-primary);
+      }
+
+      .step-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: var(--space-3);
+      }
+
+      .step-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-step);
+        padding: 20px;
+        display: grid;
+        gap: 10px;
+      }
+
+      .step-label {
+        margin: 0;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 16px;
+        font-weight: 600;
+      }
+
+      .step-title {
+        margin: 0;
+        font-size: 16px;
+        line-height: 24px;
+        font-weight: 600;
+      }
+
+      .split-card {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: var(--space-4);
+      }
+
+      .split-title {
+        margin: 0 0 var(--space-2);
+        font-size: 16px;
+        line-height: 24px;
+        font-weight: 600;
+      }
+
+      .clean-list {
+        margin: 0;
+        padding-left: 18px;
+        display: grid;
+        gap: var(--space-1);
+      }
+
+      .footer {
+        margin-top: var(--space-6);
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 20px;
+      }
+
+      .flash-stack {
+        display: grid;
+        gap: var(--space-1);
+        margin-bottom: var(--space-3);
+      }
+
+      .flash {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 10px 12px;
+        font-size: 14px;
+        line-height: 20px;
+        color: var(--text-secondary);
+      }
+
+      .flash.success {
+        border-color: #0f766e55;
+      }
+
+      .flash.error {
+        border-color: #b91c1c55;
+        color: var(--danger);
+      }
+
+      .form-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: var(--space-2);
+      }
+
+      .field {
+        display: grid;
+        gap: 6px;
+      }
+
+      .field-label {
+        font-size: 14px;
+        line-height: 20px;
+        font-weight: 600;
+        color: var(--text-secondary);
+      }
+
+      .field input,
+      .field select {
+        width: 100%;
+        min-height: 44px;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        color: var(--text-primary);
+        background: var(--surface);
+        font-size: 16px;
+        line-height: 24px;
+      }
+
+      .slot-grid {
+        margin-top: var(--space-3);
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        gap: 12px;
+      }
+
+      .slot-btn {
+        min-height: 48px;
+        border-radius: 12px;
+        border: 1px solid #981e3288;
+        background: var(--surface);
+        color: var(--text-primary);
+        font-size: 14px;
+        line-height: 20px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .slot-btn.is-selected {
+        background: var(--wsu-crimson);
+        color: #ffffff;
+      }
+
+      @media (max-width: 1100px) {
+        .page {
+          width: min(1248px, calc(100% - 96px));
+        }
+
+        .step-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      @media (max-width: 760px) {
+        .page {
+          width: calc(100% - 32px);
+          padding: var(--space-2) 0 var(--space-5);
+        }
+
+        .top-nav {
+          margin-bottom: var(--space-4);
+        }
+
+        .brand {
+          font-size: 1.125rem;
+          position: static;
+          left: auto;
+          transform: none;
+        }
+
+        .nav-actions .btn-secondary {
+          display: none;
+        }
+
+        .card,
+        .panel {
+          padding: var(--space-3);
+        }
+
+        h1,
+        .h1 {
+          font-size: 34px;
+          line-height: 40px;
+        }
+
+        .step-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .split-card {
+          grid-template-columns: 1fr;
+          gap: var(--space-3);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header class="top-nav">
+        <div class="brand">Secretariat</div>
+        <nav class="nav-actions" aria-label="Primary">
+          {% block nav_actions %}
+            <a class="btn btn-secondary" href="{{ url_for('index') }}">Home</a>
+            <a class="btn btn-primary" href="{{ url_for('availability') }}">
+              Open Availability UI
+            </a>
+          {% endblock %}
+        </nav>
+      </header>
+
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          <section class="flash-stack" aria-label="Notifications">
+            {% for category, message in messages %}
+              <div class="flash {{ category }}">{{ message }}</div>
+            {% endfor %}
+          </section>
+        {% endif %}
+      {% endwith %}
+
+      <main>{% block content %}{% endblock %}</main>
+    </div>
+  </body>
+</html>

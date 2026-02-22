@@ -12,6 +12,7 @@ build/*
 *.out
 *.err
 credentials.json
+credentials_web.json
 token.json
 */data/*
 

@@ -21,3 +21,6 @@ temp.py
 
 # dont commit MacOS files
 .DS_Store
+
+# keep the app brand asset tracked
+!Secretariat/static/images/secretariat-logo.png

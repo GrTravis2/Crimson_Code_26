@@ -12,6 +12,7 @@ import flask
 from secretariat.app import Secretariat
 from secretariat.controllers.auth import AUTH
 from secretariat.controllers.home import HOME
+from secretariat.google_calendar.google_calendar import GoogleCalendar
 
 if TYPE_CHECKING:
     from secretariat.app import Secretariat
@@ -32,6 +33,8 @@ def _load_secret_key() -> str:
             secret_key = env_file.read().strip()
             if secret_key:
                 return secret_key
+    else:
+        raise ValueError
 
     return os.environ.get("SECRET_KEY", "dev-only-secret-key")
 
@@ -41,12 +44,21 @@ def create_app() -> Secretariat:
     app = Secretariat(__name__, instance_relative_config=True)
     app.config.from_mapping(
         SECRET_KEY=_load_secret_key(),
-        GOOG_AUTH="token.json",
+        SESSION_COOKIE_SECURE=False,
     )
 
     os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"  # only for local testing
     app.register_blueprint(HOME)
     app.register_blueprint(AUTH)
+
+    cal_ids = {
+        ("zuriel", "zurielhernandez04@gmail.com"),
+        (
+            "test",
+            "7400e98d2ffd7844bc8925b0753fc023a4d8876ec190205d73429e0dffd0db55@group.calendar.google.com",
+        ),
+    }
+    app.calendars = {alias: GoogleCalendar(id) for alias, id in cal_ids}
 
     # create index page to start on
     @app.route("/")

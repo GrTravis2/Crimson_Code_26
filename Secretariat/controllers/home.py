@@ -4,6 +4,10 @@ from datetime import date, datetime, time, timedelta
 from typing import Any
 
 import flask
+from googleapiclient.discovery import build
+
+from secretariat.controllers import auth
+from secretariat.google_calendar.google_calendar import GoogleCalendar
 
 HOME = flask.Blueprint(
     name="home",
@@ -23,9 +27,20 @@ SERVICE_OPTIONS: list[dict[str, Any]] = [
 
 
 @HOME.route("/", methods=["GET"])
+@auth.refresh
 def home() -> str:
     """Home page rendering."""
-    return flask.render_template("index.html")
+    with flask.current_app.app_context():
+        cal: GoogleCalendar = flask.current_app.calendars["test"]  # type: ignore
+
+    service = build("calendar", "v3", flask.session["credentials"])
+    start = datetime.now()
+    end = start + timedelta(days=14)
+    events = cal.get_calendar_events(service, start, end)
+    return flask.render_template(
+        "index.html",
+        events=events,
+    )
 
 
 def _parse_iso_date(raw_date: str | None) -> date:

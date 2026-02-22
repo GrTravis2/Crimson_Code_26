@@ -26,6 +26,7 @@ dev = [
     "black",
     "isort",
     "pyright",
+    "pytest",
 ]
 
 [project.scripts]
@@ -48,7 +49,7 @@ select = [
 ignore = [
     #"put err code here", # ignore specific err codes here, only do if its very unreasonable!
 ]
-exclude = [".venv", "*.md", ".egg*", ".git", ".gitignore"] # stuff not to lint + format
+exclude = [".venv", "*.md", ".egg*", ".git", ".gitignore", "tests/**"] # stuff not to lint + format
 
 [tool.pyright]
 venvPath = "."

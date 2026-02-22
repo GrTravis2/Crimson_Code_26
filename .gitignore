@@ -11,6 +11,8 @@ build/*
 *.txt
 *.out
 *.err
+credentials.json
+token.json
 */data/*
 
 # dont commit empty script for testing stuff
